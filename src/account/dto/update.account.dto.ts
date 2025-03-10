@@ -1,7 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsString, Length } from 'class-validator';
 
-export class UpdateAccountDto {
+export class UpdatePasswordDTO {
   @ApiProperty({
     description: 'Mật khẩu hiện tại (bắt buộc khi thay đổi mật khẩu)',
     minLength: 5,

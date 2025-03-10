@@ -30,7 +30,7 @@ export class CreateAccountDto {
   password: string;
 
   @ApiProperty({
-    description: 'User role',
+    description: 'Account role',
     enum: Role,
     default: Role.USER,
     required: false,

@@ -7,6 +7,6 @@ import { ProfileService } from './profile.service';
   imports: [PrismaModule],
   controllers: [ProfileController],
   providers: [ProfileService],
-  exports: [ProfileService]
+  exports: [ProfileService],
 })
 export class ProfileModule {}

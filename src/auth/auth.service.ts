@@ -11,11 +11,12 @@ import { JwtService } from '@nestjs/jwt';
 import { Account, Role } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
+import { Request } from 'express';
 import { Resend } from 'resend';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { RedisService } from 'src/redis/redis.service';
-import { ForgotPasswordDto, ResetPasswordDto } from './dto/forgot.password.dto';
-import { LoginUserDto, LoginUserResponseDto } from './dto/login.dto';
+import { ForgotPasswordDTO, ResetPasswordDTO } from './dto/forgot.password.dto';
+import { LoginDTO, LoginUserResponseDto } from './dto/login.dto';
 import { RegisterDto, RegisterResponseDto } from './dto/register.dto';
 import {
   JwtPayload,
@@ -37,8 +38,8 @@ export class AuthService {
   }
 
   async login(
-    loginData: LoginUserDto,
-    req: any,
+    loginData: LoginDTO,
+    req: Request,
   ): Promise<LoginUserResponseDto> {
     const { username, password } = loginData;
     const account = await this.prismaService.account.findUnique({
@@ -74,7 +75,6 @@ export class AuthService {
   }
 
   async register(data: RegisterDto): Promise<RegisterResponseDto> {
-    // Kiểm tra username đã tồn tại chưa
     const existingUsername = await this.prismaService.account.findUnique({
       where: { username: data.username },
     });
@@ -83,7 +83,6 @@ export class AuthService {
       throw new ConflictException('Tên đăng nhập đã tồn tại');
     }
 
-    // Kiểm tra email đã tồn tại chưa
     const existingEmail = await this.prismaService.account.findUnique({
       where: { email: data.email },
     });
@@ -138,7 +137,7 @@ export class AuthService {
     ]);
   }
 
-  async generateAccessToken(user: Account): Promise<string> {
+  async generateAccessToken(account: Account): Promise<string> {
     try {
       if (!process.env.JWT_ACCESS_SECRET) {
         throw new Error('JWT_ACCESS_SECRET not set');
@@ -146,9 +145,9 @@ export class AuthService {
 
       const tokenId = crypto.randomBytes(16).toString('hex');
       const payload: JwtPayload = {
-        sub: user.id,
-        username: user.username,
-        role: user.role,
+        sub: account.id,
+        username: account.username,
+        role: account.role,
         type: 'access',
         jti: tokenId,
       };
@@ -281,7 +280,7 @@ export class AuthService {
   }
 
   async generateRefreshToken(
-    user: Account,
+    account: Account,
     req: any,
     existingToken?: string,
   ): Promise<string> {
@@ -318,9 +317,9 @@ export class AuthService {
       const tokenId = crypto.randomBytes(16).toString('hex');
 
       const payload: JwtPayload = {
-        sub: user.id,
-        username: user.username,
-        role: user.role,
+        sub: account.id,
+        username: account.username,
+        role: account.role,
         type: 'refresh',
         jti: tokenId,
       };
@@ -330,31 +329,33 @@ export class AuthService {
         expiresIn,
       });
       const fingerprint = this.generateFingerprint(req);
-      // Tạo một session key duy nhất cho user
-      const sessionKey = `refresh_token:${user.id}:${tokenId}`;
+      // Tạo một session key duy nhất cho account
+      const sessionKey = `refresh_token:${account.id}:${tokenId}`;
 
       // Lưu token với thông tin chi tiết để dễ dàng quản lý
       const tokenData: RefreshTokenRedisPayload = {
         token,
-        userId: user.id,
+        userId: account.id,
         fingerprint,
         expiresAt: new Date(Date.now() + ttl * 1000),
       };
 
       const userTokenPatterns = await this.redisService.keys(
-        `refresh_token:${user.id}:*`,
+        `refresh_token:${account.id}:*`,
       );
       if (userTokenPatterns.length >= 3) {
         // Chỉ cho phép 3 session đồng thời
         const oldestToken = userTokenPatterns[0];
         await this.redisService.del(oldestToken);
-        this.logger.debug(`Removed oldest token for user ${user.username}`);
+        this.logger.debug(
+          `Removed oldest token for account ${account.username}`,
+        );
       }
 
       // Lưu token mới
       await this.redisService.set(sessionKey, JSON.stringify(tokenData), ttl);
       this.logger.debug(
-        `Generated refresh token for user: ${user.username} with TTL: ${ttl}s`,
+        `Generated refresh token for account: ${account.username} with TTL: ${ttl}s`,
       );
 
       return token;
@@ -401,18 +402,18 @@ export class AuthService {
         throw new UnauthorizedException('Invalid refresh token');
       }
 
-      const user = await this.prismaService.account.findUnique({
+      const account = await this.prismaService.account.findUnique({
         where: { id: payload.sub },
       });
 
-      if (!user) {
+      if (!account) {
         this.logger.warn(
           `User not found for refresh token: ${payload.username}`,
         );
         throw new UnauthorizedException('User not found');
       }
 
-      return user;
+      return account;
     } catch (error) {
       if (error instanceof UnauthorizedException) {
         throw error;
@@ -429,13 +430,13 @@ export class AuthService {
       }
 
       // Giải mã token để lấy payload
-      const payload = this.jwtService.decode(token) as JwtPayload;
+      const payload = this.jwtService.decode(token);
 
       if (payload?.sub && payload?.jti) {
         const sessionKey = `refresh_token:${payload.sub}:${payload.jti}`;
         await this.redisService.del(sessionKey);
         this.logger.debug(
-          `Revoked refresh token: ${payload.jti} for user: ${payload.username}`,
+          `Revoked refresh token: ${payload.jti} for account: ${payload.username}`,
         );
       }
     } catch (error) {
@@ -443,23 +444,25 @@ export class AuthService {
     }
   }
 
-  async revokeAllUserSessions(userId: string): Promise<void> {
+  async revokeAllAccountSessions(accountID: string): Promise<void> {
     try {
       const userTokenPatterns = await this.redisService.keys(
-        `refresh_token:${userId}:*`,
+        `refresh_token:${accountID}:*`,
       );
 
       for (const tokenKey of userTokenPatterns) {
         await this.redisService.del(tokenKey);
       }
 
-      this.logger.debug(`Revoked all sessions for user ID: ${userId}`);
+      this.logger.debug(`Revoked all sessions for account ID: ${accountID}`);
     } catch (error) {
-      this.logger.error(`Error revoking all user sessions: ${error.message}`);
+      this.logger.error(
+        `Error revoking all account sessions: ${error.message}`,
+      );
     }
   }
 
-  async forgotPassword(forgotPasswordDto: ForgotPasswordDto): Promise<void> {
+  async forgotPassword(forgotPasswordDto: ForgotPasswordDTO): Promise<void> {
     const account = await this.prismaService.account.findUnique({
       where: { email: forgotPasswordDto.email },
     });
@@ -483,7 +486,7 @@ export class AuthService {
     const resetToken = crypto.randomBytes(32).toString('hex');
     const expiresIn = 3600; // 1 giờ tính bằng giây
 
-    // Lưu thông tin reset password vào Redis với ID user làm khóa
+    // Lưu thông tin reset password vào Redis với ID account làm khóa
     await Promise.all([
       // Lưu token với ID làm khóa để dễ tìm kiếm
       this.redisService.set(`reset_token:${resetToken}`, account.id, expiresIn),
@@ -552,8 +555,7 @@ export class AuthService {
     });
   }
 
-  async resetPassword(resetPasswordDto: ResetPasswordDto): Promise<void> {
-    // Tìm tất cả các key reset token trong Redis
+  async resetPassword(resetPasswordDto: ResetPasswordDTO): Promise<void> {
     const userId = await this.redisService.get(
       `reset_token:${resetPasswordDto.token}`,
     );

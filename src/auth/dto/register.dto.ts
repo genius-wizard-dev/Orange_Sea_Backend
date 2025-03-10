@@ -1,12 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Role } from '@prisma/client';
-import {
-  IsEmail,
-  IsEnum,
-  IsOptional,
-  IsString,
-  Length,
-} from 'class-validator';
+import { IsEmail, IsEnum, IsOptional, IsString, Length } from 'class-validator';
 
 export class RegisterDto {
   @ApiProperty({ description: 'Tên đăng nhập', minLength: 5, maxLength: 50 })

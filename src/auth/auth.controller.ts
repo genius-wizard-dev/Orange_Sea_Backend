@@ -11,8 +11,8 @@ import {
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
-import { ForgotPasswordDto, ResetPasswordDto } from './dto/forgot.password.dto';
-import { LoginUserDto } from './dto/login.dto';
+import { ForgotPasswordDTO, ResetPasswordDTO } from './dto/forgot.password.dto';
+import { LoginDTO } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 
 @ApiTags('auth')
@@ -25,7 +25,7 @@ export class AuthController {
   @ApiOperation({ summary: 'Đăng nhập với username và mật khẩu' })
   @ApiResponse({ status: 200, description: 'Đăng nhập thành công' })
   @ApiResponse({ status: 401, description: 'Thông tin đăng nhập không hợp lệ' })
-  async login(@Body() loginDto: LoginUserDto, @Req() req: any) {
+  async login(@Body() loginDto: LoginDTO, @Req() req: any) {
     try {
       const result = await this.authService.login(loginDto, req);
       return {
@@ -68,14 +68,17 @@ export class AuthController {
     }
     try {
       // Xác thực refresh token
-      const user = await this.authService.verifyRefreshToken(refreshToken, req);
+      const account = await this.authService.verifyRefreshToken(
+        refreshToken,
+        req,
+      );
 
       // Tạo access token mới
-      const accessToken = await this.authService.generateAccessToken(user);
+      const accessToken = await this.authService.generateAccessToken(account);
 
       // Tạo refresh token mới, giữ thời gian hết hạn ban đầu
       const newRefreshToken = await this.authService.generateRefreshToken(
-        user,
+        account,
         req,
         refreshToken,
       );
@@ -125,7 +128,7 @@ export class AuthController {
   @Post('forgot-password')
   @HttpCode(HttpStatus.OK)
   async forgotPassword(
-    @Body() forgotPasswordDto: ForgotPasswordDto,
+    @Body() forgotPasswordDto: ForgotPasswordDTO,
   ): Promise<void> {
     await this.authService.forgotPassword(forgotPasswordDto);
   }
@@ -133,7 +136,7 @@ export class AuthController {
   @Post('reset-password')
   @HttpCode(HttpStatus.OK)
   async resetPassword(
-    @Body() resetPasswordDto: ResetPasswordDto,
+    @Body() resetPasswordDto: ResetPasswordDTO,
   ): Promise<void> {
     await this.authService.resetPassword(resetPasswordDto);
   }
