@@ -23,19 +23,19 @@ export class RolesGuard implements CanActivate {
       return true;
     }
 
-    const { user } = context.switchToHttp().getRequest();
-    this.logger.debug(`Account request role: ${user.role}`);
+    const { account } = context.switchToHttp().getRequest();
+    this.logger.debug(`Account request role: ${account.role}`);
 
-    if (!user) {
+    if (!account) {
       throw new UnauthorizedException(
         'Not Permission: No account found in request',
       );
     }
 
-    const hasRequiredRole = requiredRoles.includes(user.role);
+    const hasRequiredRole = requiredRoles.includes(account.role);
     if (!hasRequiredRole) {
       throw new UnauthorizedException(
-        `Not Permission: Account role (${user.role}) does not have access. Required roles: ${requiredRoles.join(', ')}`,
+        `Not Permission: Account role (${account.role}) does not have access. Required roles: ${requiredRoles.join(', ')}`,
       );
     }
 

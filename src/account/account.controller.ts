@@ -1,8 +1,8 @@
 import {
   Body,
   Controller,
-  Delete,
   Get,
+  Logger,
   Param,
   Patch,
   Req,
@@ -16,11 +16,11 @@ import {
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from 'src/auth/auth.guard';
 import { AccountService } from './account.service';
-import { UpdateAccountDto } from './dto/update.account.dto';
-
+import { UpdatePasswordDTO } from './dto/update.account.dto';
 @ApiTags('account')
 @Controller('account')
 export class AccountController {
+  private readonly logger = new Logger(AccountController.name);
   constructor(private readonly accountService: AccountService) {}
 
   @Get(':id')
@@ -66,20 +66,20 @@ export class AccountController {
   @ApiResponse({ status: 200, description: 'Cập nhật mật khẩu thành công' })
   async updatePassword(
     @Param('id') id: string,
-    @Body() updateAccountDto: UpdateAccountDto,
-    @Req() req: any,
+    @Body() updatePassword: UpdatePasswordDTO,
+    @Req() req: any, // req.account contains decoded JWT payload after JwtAuthGuard processes the request
   ) {
-    if (req.user.id !== id && req.user.role !== 'ADMIN') {
+    this.logger.debug('Account object:', req.account);
+    this.logger.debug(`ID param: ${id}`);
+
+    if (req.account.id !== id && req.account.role !== 'ADMIN') {
       return {
         status: 'error',
         message: 'Bạn chỉ có thể cập nhật tài khoản của chính mình',
       };
     }
 
-    const result = await this.accountService.updateAccount(
-      id,
-      updateAccountDto,
-    );
+    const result = await this.accountService.updateAccount(id, updatePassword);
     return {
       status: 'success',
       message: 'Cập nhật mật khẩu thành công',
@@ -87,24 +87,24 @@ export class AccountController {
     };
   }
 
-  @Delete(':id')
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
-  @ApiOperation({ summary: 'Xóa tài khoản' })
-  @ApiResponse({ status: 200, description: 'Xóa tài khoản thành công' })
-  async deleteAccount(@Param('id') id: string, @Req() req: any) {
-    // Đảm bảo người dùng chỉ có thể xóa tài khoản của chính họ trừ khi họ là admin
-    if (req.user.id !== id && req.user.role !== 'ADMIN') {
-      return {
-        status: 'error',
-        message: 'Bạn chỉ có thể xóa tài khoản của chính mình',
-      };
-    }
+  // @Delete(':id')
+  // @UseGuards(JwtAuthGuard)
+  // @ApiBearerAuth()
+  // @ApiOperation({ summary: 'Xóa tài khoản' })
+  // @ApiResponse({ status: 200, description: 'Xóa tài khoản thành công' })
+  // async deleteAccount(@Param('id') id: string, @Req() req: any) {
+  //   // Đảm bảo người dùng chỉ có thể xóa tài khoản của chính họ trừ khi họ là admin
+  //   if (req.account.id !== id && req.account.role !== 'ADMIN') {
+  //     return {
+  //       status: 'error',
+  //       message: 'Bạn chỉ có thể xóa tài khoản của chính mình',
+  //     };
+  //   }
 
-    await this.accountService.deleteAccount(id);
-    return {
-      status: 'success',
-      message: 'Xóa tài khoản thành công',
-    };
-  }
+  //   await this.accountService.deleteAccount(id);
+  //   return {
+  //     status: 'success',
+  //     message: 'Xóa tài khoản thành công',
+  //   };
+  // }
 }

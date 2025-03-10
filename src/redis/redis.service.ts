@@ -11,7 +11,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(RedisService.name);
   private redisClient: Redis;
 
-  async onModuleInit() {
+  onModuleInit() {
     const redisUrl = process.env.REDIS_URL;
     if (!redisUrl) {
       throw new Error('REDIS_URL is not defined');

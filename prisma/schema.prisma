@@ -62,6 +62,7 @@ model Profile {
   ownedConversations Conversation[]
   participatedChats  ConversationParticipant[]
   sentMessages       Message[]
+  isSetup            Boolean?                  @default(false)
 
   @@index([accountId, phone])
 }
