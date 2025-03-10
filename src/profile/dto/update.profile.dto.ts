@@ -1,17 +1,12 @@
 import { ApiProperty } from '@nestjs/swagger';
-import {
-    IsDateString,
-    IsOptional,
-    IsString,
-    Length,
-} from 'class-validator';
+import { IsDateString, IsOptional, IsString, Length } from 'class-validator';
 
-export class UpdateProfileDto {
+export class UpdateProfileDTO {
   @ApiProperty({
     description: 'Tên đầy đủ',
     minLength: 2,
     maxLength: 100,
-    required: false
+    required: false,
   })
   @IsString()
   @Length(2, 100)
@@ -20,7 +15,7 @@ export class UpdateProfileDto {
 
   @ApiProperty({
     description: 'Số điện thoại',
-    required: false
+    required: false,
   })
   @IsString()
   @IsOptional()
@@ -28,7 +23,7 @@ export class UpdateProfileDto {
 
   @ApiProperty({
     description: 'Tiểu sử',
-    required: false
+    required: false,
   })
   @IsString()
   @IsOptional()
@@ -36,7 +31,7 @@ export class UpdateProfileDto {
 
   @ApiProperty({
     description: 'URL ảnh đại diện',
-    required: false
+    required: false,
   })
   @IsString()
   @IsOptional()
@@ -44,7 +39,7 @@ export class UpdateProfileDto {
 
   @ApiProperty({
     description: 'Ngày sinh (định dạng ISO)',
-    required: false
+    required: false,
   })
   @IsDateString()
   @IsOptional()

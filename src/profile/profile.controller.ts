@@ -9,9 +9,8 @@ import {
 } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/auth.guard';
-import { UpdateProfileDto } from './dto/update.profile.dto';
+import { UpdateProfileDTO } from './dto/update.profile.dto';
 import { ProfileService } from './profile.service';
-
 @ApiTags('profile')
 @Controller('profile')
 export class ProfileController {
@@ -25,7 +24,7 @@ export class ProfileController {
   async getMyProfile(@Req() req: any) {
     try {
       const profile = await this.profileService.getProfileByAccountId(
-        req.user.id,
+        req.account.id,
       );
       return {
         status: 'success',
@@ -44,12 +43,12 @@ export class ProfileController {
   @ApiResponse({ status: 401, description: 'Không có quyền truy cập' })
   async updateMyProfile(
     @Req() req: any,
-    @Body() updateProfileDto: UpdateProfileDto,
+    @Body() updateProfileDTO: UpdateProfileDTO,
   ) {
     try {
       const profile = await this.profileService.updateProfile(
-        req.user.id,
-        updateProfileDto,
+        req.account.id,
+        updateProfileDTO,
       );
       return {
         status: 'success',

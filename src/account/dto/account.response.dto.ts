@@ -32,16 +32,28 @@ export class ProfileResponseDto {
   @ApiProperty({ description: 'ID tài khoản mà hồ sơ này thuộc về' })
   accountId: string;
 
-  @ApiProperty({ description: 'Họ tên đầy đủ', required: false, nullable: true })
+  @ApiProperty({
+    description: 'Họ tên đầy đủ',
+    required: false,
+    nullable: true,
+  })
   name: string | null;
 
-  @ApiProperty({ description: 'URL ảnh đại diện', required: false, nullable: true })
+  @ApiProperty({
+    description: 'URL ảnh đại diện',
+    required: false,
+    nullable: true,
+  })
   avatar: string | null;
 
   @ApiProperty({ description: 'Tiểu sử', required: false, nullable: true })
   bio: string | null;
 
-  @ApiProperty({ description: 'Số điện thoại', required: false, nullable: true })
+  @ApiProperty({
+    description: 'Số điện thoại',
+    required: false,
+    nullable: true,
+  })
   phone: string | null;
 
   @ApiProperty({ description: 'Ngày sinh', required: false, nullable: true })
@@ -73,6 +85,10 @@ export class AccountWithProfileResponseDto {
   @ApiProperty({ description: 'Thời gian cập nhật tài khoản' })
   updatedAt: Date;
 
-  @ApiProperty({ description: 'Thông tin hồ sơ', required: false, nullable: true })
+  @ApiProperty({
+    description: 'Thông tin hồ sơ',
+    required: false,
+    nullable: true,
+  })
   profile: ProfileResponseDto | null;
 }

@@ -31,20 +31,18 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       // Xác thực token qua service
       await this.authService.validateAccessToken(token);
 
-      const userData = await this.profileService.findByUsername(
-        payload.username,
-      );
-      if (!userData) {
+      const result = await this.profileService.findByUsername(payload.username);
+      if (!result) {
         throw new UnauthorizedException(
           'Not Permission: User account no longer exists in the system',
         );
       }
 
       return {
-        id: userData.id,
-        username: userData.username,
-        role: userData.role,
-        profileId: userData.profile.id,
+        id: result.id,
+        username: result.username,
+        role: result.role,
+        profileId: result.profile.id,
       };
     } catch (error) {
       throw new UnauthorizedException(error.message);

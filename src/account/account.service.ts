@@ -1,8 +1,7 @@
 import {
   Injectable,
-  Logger,
   NotFoundException,
-  UnauthorizedException
+  UnauthorizedException,
 } from '@nestjs/common';
 import { Account } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
@@ -11,11 +10,11 @@ import {
   AccountResponseDto,
   AccountWithProfileResponseDto,
 } from './dto/account.response.dto';
-import { UpdateAccountDto } from './dto/update.account.dto';
+import { UpdatePasswordDTO } from './dto/update.account.dto';
 
 @Injectable()
 export class AccountService {
-  private readonly logger = new Logger(AccountService.name);
+  // private readonly logger = new Logger(AccountService.name);
 
   constructor(private prisma: PrismaService) {}
 
@@ -28,8 +27,7 @@ export class AccountService {
     if (!account) {
       throw new NotFoundException(`Không tìm thấy tài khoản với ID: ${id}`);
     }
-
-    return this.mapToAccountWithProfileDto(account);
+    return this.mapToAccountWithProfileDTO(account);
   }
 
   async findAccountByUsername(
@@ -46,12 +44,12 @@ export class AccountService {
       );
     }
 
-    return this.mapToAccountWithProfileDto(account);
+    return this.mapToAccountWithProfileDTO(account);
   }
 
   async updateAccount(
     id: string,
-    updateAccountDto: UpdateAccountDto,
+    updatePassword: UpdatePasswordDTO,
   ): Promise<AccountResponseDto> {
     const account = await this.prisma.account.findUnique({
       where: { id },
@@ -62,7 +60,7 @@ export class AccountService {
     }
 
     const isPasswordValid = await bcrypt.compare(
-      updateAccountDto.currentPassword,
+      updatePassword.currentPassword,
       account.password,
     );
 
@@ -73,10 +71,9 @@ export class AccountService {
     // Cập nhật thông tin tài khoản
     const updateData: any = {};
 
-
     // Cập nhật mật khẩu nếu được cung cấp
-    if (updateAccountDto.newPassword) {
-      const hashedPassword = await bcrypt.hash(updateAccountDto.newPassword, 10);
+    if (updatePassword.newPassword) {
+      const hashedPassword = await bcrypt.hash(updatePassword.newPassword, 10);
       updateData.password = hashedPassword;
     }
 
@@ -89,21 +86,21 @@ export class AccountService {
     return this.mapToAccountDto(updatedAccount);
   }
 
-  async deleteAccount(id: string): Promise<void> {
-    // Kiểm tra xem tài khoản có tồn tại không
-    const account = await this.prisma.account.findUnique({
-      where: { id },
-    });
+  // async deleteAccount(id: string): Promise<void> {
+  //   // Kiểm tra xem tài khoản có tồn tại không
+  //   const account = await this.prisma.account.findUnique({
+  //     where: { id },
+  //   });
 
-    if (!account) {
-      throw new NotFoundException(`Không tìm thấy tài khoản với ID: ${id}`);
-    }
+  //   if (!account) {
+  //     throw new NotFoundException(`Không tìm thấy tài khoản với ID: ${id}`);
+  //   }
 
-    // Xóa tài khoản (cascade sẽ xóa profile và các dữ liệu liên quan)
-    await this.prisma.account.delete({
-      where: { id },
-    });
-  }
+  //   // Xóa tài khoản (cascade sẽ xóa profile và các dữ liệu liên quan)
+  //   await this.prisma.account.delete({
+  //     where: { id },
+  //   });
+  // }
 
   // Helper methods
   private mapToAccountDto(account: Account): AccountResponseDto {
@@ -118,7 +115,7 @@ export class AccountService {
     return accountDto;
   }
 
-  private mapToAccountWithProfileDto(
+  private mapToAccountWithProfileDTO(
     account: any,
   ): AccountWithProfileResponseDto {
     const accountWithProfileDto: AccountWithProfileResponseDto = {

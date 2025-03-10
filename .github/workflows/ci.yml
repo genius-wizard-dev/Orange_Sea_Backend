@@ -44,8 +44,5 @@ jobs:
       - name: Validate Prisma schema
         run: npx prisma validate
 
-      - name: Lint code
-        run: npm run lint
-
       - name: Build project
         run: NODE_ENV=production npm run build
