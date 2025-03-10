@@ -1,0 +1,169 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum FriendshipStatus {
+  PENDING // Đã gửi lời mời kết bạn nhưng chưa được chấp nhận
+  ACCEPTED // Hai người đã trở thành bạn bè
+  REJECTED // Bị từ chối (có thể lưu hoặc xóa hẳn)
+}
+
+enum GroupRole {
+  OWNER // Nhóm trưởng
+  ADMIN // Nhóm phó
+  MEMBER // Thành viên
+}
+
+model Account {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  email     String   @unique
+  username  String   @unique
+  password  String
+  role      Role     @default(USER)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  profile   Profile?
+
+  @@index([email, username])
+}
+
+model Profile {
+  id        String    @id @default(auto()) @map("_id") @db.ObjectId
+  account   Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  accountId String    @unique @db.ObjectId
+  name      String?
+  avatar    String?
+  bio       String?
+  phone     String?   @unique
+  birthday  DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  // Friendship relations
+  sentFriendRequests     Friendship[] @relation("RequesterRelation")
+  receivedFriendRequests Friendship[] @relation("AddresseeRelation")
+
+  // Posts and interactions
+  posts    Post[]
+  comments Comment[]
+  likes    Like[]
+
+  // Conversations
+  ownedConversations Conversation[]
+  participatedChats  ConversationParticipant[]
+  sentMessages       Message[]
+
+  @@index([accountId, phone])
+}
+
+model Friendship {
+  id          String           @id @default(auto()) @map("_id") @db.ObjectId
+  requester   Profile          @relation("RequesterRelation", fields: [requesterId], references: [id], onDelete: Cascade)
+  requesterId String           @db.ObjectId
+  addressee   Profile          @relation("AddresseeRelation", fields: [addresseeId], references: [id], onDelete: Cascade)
+  addresseeId String           @db.ObjectId
+  status      FriendshipStatus @default(PENDING)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  @@unique([requesterId, addresseeId])
+  @@index([requesterId, status])
+  @@index([addresseeId, status])
+}
+
+model Post {
+  id        String    @id @default(auto()) @map("_id") @db.ObjectId
+  author    Profile   @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  authorId  String    @db.ObjectId
+  content   String?
+  image     String?
+  video     String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  comments  Comment[]
+  likes     Like[]
+
+  @@index([authorId, createdAt(sort: Desc)])
+}
+
+model Comment {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  postId    String   @db.ObjectId
+  author    Profile  @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  authorId  String   @db.ObjectId
+  content   String
+  createdAt DateTime @default(now())
+
+  @@index([postId, createdAt(sort: Desc)])
+  @@index([authorId])
+}
+
+model Like {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  postId    String   @db.ObjectId
+  user      Profile  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String   @db.ObjectId
+  createdAt DateTime @default(now())
+
+  @@unique([postId, userId])
+  @@index([postId])
+  @@index([userId])
+}
+
+model Conversation {
+  id            String                    @id @default(auto()) @map("_id") @db.ObjectId
+  name          String?
+  isGroup       Boolean                   @default(false) // Nhóm chat hay chat riêng?
+  owner         Profile                   @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  ownerId       String                    @db.ObjectId // Lưu nhóm trưởng
+  participants  ConversationParticipant[]
+  messages      Message[]
+  lastMessageId String?                   @db.ObjectId
+  createdAt     DateTime                  @default(now())
+  updatedAt     DateTime                  @updatedAt
+
+  @@index([ownerId])
+}
+
+model ConversationParticipant {
+  id             String       @id @default(auto()) @map("_id") @db.ObjectId
+  user           Profile      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId         String       @db.ObjectId
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  conversationId String       @db.ObjectId
+  role           GroupRole    @default(MEMBER)
+  joinedAt       DateTime     @default(now())
+
+  @@unique([userId, conversationId])
+  @@index([conversationId])
+  @@index([userId])
+}
+
+model Message {
+  id             String       @id @default(auto()) @map("_id") @db.ObjectId
+  sender         Profile      @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  senderId       String       @db.ObjectId
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  conversationId String       @db.ObjectId
+  content        String?
+  fileUrl        String?
+  fileType       String?
+  isRead         Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([conversationId, createdAt(sort: Desc)])
+  @@index([senderId])
+}
