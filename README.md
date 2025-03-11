@@ -135,6 +135,9 @@
    Authorization: Bearer <token>
    ```
 
+### Posts
+   3. Đẹp
+
 ## Cài đặt và Chạy
 
 1. Cài đặt dependencies:
