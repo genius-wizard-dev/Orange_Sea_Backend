@@ -13,9 +13,10 @@ enum Role {
 }
 
 enum FriendshipStatus {
-  PENDING // Đã gửi lời mời kết bạn nhưng chưa được chấp nhận
-  ACCEPTED // Hai người đã trở thành bạn bè
-  REJECTED // Bị từ chối (có thể lưu hoặc xóa hẳn)
+  PENDING // Đang chờ xác nhận: Đã gửi lời mời kết bạn nhưng người nhận chưa phản hồi
+  ACCEPTED // Đã chấp nhận: Hai người đã là bạn bè
+  REJECTED // Đã từ chối: Lời mời kết bạn bị từ chối
+  BLOCKED // Đã chặn: Mối quan hệ bị chặn bởi một trong hai người
 }
 
 enum GroupRole {
@@ -48,10 +49,16 @@ model Profile {
   birthday  DateTime?
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
+  isSetup   Boolean?  @default(false)
 
-  // Friendship relations
-  sentFriendRequests     Friendship[] @relation("RequesterRelation")
-  receivedFriendRequests Friendship[] @relation("AddresseeRelation")
+  // Mối quan hệ bạn bè
+  // Những lời mời kết bạn đã gửi đi (người dùng là người gửi)
+  sentFriendRequests     Friendship[] @relation("SenderRelation")
+  // Những lời mời kết bạn đã nhận được (người dùng là người nhận)
+  receivedFriendRequests Friendship[] @relation("ReceiverRelation")
+
+  // Danh sách bạn bè (đơn giản hóa)
+  friends Friend[]
 
   // Posts and interactions
   posts    Post[]
@@ -62,24 +69,41 @@ model Profile {
   ownedConversations Conversation[]
   participatedChats  ConversationParticipant[]
   sentMessages       Message[]
-  isSetup            Boolean?                  @default(false)
 
   @@index([accountId, phone])
 }
 
-model Friendship {
-  id          String           @id @default(auto()) @map("_id") @db.ObjectId
-  requester   Profile          @relation("RequesterRelation", fields: [requesterId], references: [id], onDelete: Cascade)
-  requesterId String           @db.ObjectId
-  addressee   Profile          @relation("AddresseeRelation", fields: [addresseeId], references: [id], onDelete: Cascade)
-  addresseeId String           @db.ObjectId
-  status      FriendshipStatus @default(PENDING)
-  createdAt   DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt
+// Model mới để lưu trữ danh sách bạn bè
+model Friend {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  profile      Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  profileId    String   @db.ObjectId
+  friendId     String   @db.ObjectId
+  friendName   String?
+  friendAvatar String?
+  createdAt    DateTime @default(now())
 
-  @@unique([requesterId, addresseeId])
-  @@index([requesterId, status])
-  @@index([addresseeId, status])
+  @@unique([profileId, friendId])
+  // Tạo index để tìm kiếm bạn bè nhanh hơn
+  @@index([profileId])
+}
+
+model Friendship {
+  id         String           @id @default(auto()) @map("_id") @db.ObjectId
+  // Người gửi lời mời kết bạn
+  sender     Profile          @relation("SenderRelation", fields: [senderId], references: [id], onDelete: Cascade)
+  senderId   String           @db.ObjectId
+  // Người nhận lời mời kết bạn
+  receiver   Profile          @relation("ReceiverRelation", fields: [receiverId], references: [id], onDelete: Cascade)
+  receiverId String           @db.ObjectId
+  // Trạng thái mối quan hệ: PENDING (đang chờ), ACCEPTED (đã chấp nhận), REJECTED (đã từ chối), BLOCKED (đã chặn)
+  status     FriendshipStatus @default(PENDING)
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+
+  @@unique([senderId, receiverId])
+  @@index([senderId, status])
+  @@index([receiverId, status])
 }
 
 model Post {
