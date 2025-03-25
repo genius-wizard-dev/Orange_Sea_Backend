@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Logger,
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -14,7 +15,7 @@ import { UpdatePasswordDTO } from './dto/update.account.dto';
 
 @Injectable()
 export class AccountService {
-  // private readonly logger = new Logger(AccountService.name);
+  private readonly logger = new Logger(AccountService.name);
 
   constructor(private prisma: PrismaService) {}
 

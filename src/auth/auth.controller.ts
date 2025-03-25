@@ -20,24 +20,6 @@ import { RegisterDto } from './dto/register.dto';
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
-  @Throttle({ short: { limit: 2, ttl: 1000 }, long: { limit: 5, ttl: 60000 } })
-  @Post('login')
-  @ApiOperation({ summary: 'Đăng nhập với username và mật khẩu' })
-  @ApiResponse({ status: 200, description: 'Đăng nhập thành công' })
-  @ApiResponse({ status: 401, description: 'Thông tin đăng nhập không hợp lệ' })
-  async login(@Body() loginDto: LoginDTO, @Req() req: any) {
-    try {
-      const result = await this.authService.login(loginDto, req);
-      return {
-        status: 'success',
-        message: 'Đăng nhập thành công',
-        data: result,
-      };
-    } catch (error) {
-      throw error;
-    }
-  }
-
   @Post('register')
   @ApiOperation({ summary: 'Đăng ký tài khoản mới' })
   @ApiResponse({ status: 201, description: 'Đăng ký thành công' })
@@ -52,6 +34,27 @@ export class AuthController {
       };
     } catch (error) {
       throw error;
+    }
+  }
+
+  @Throttle({ short: { limit: 2, ttl: 1000 }, long: { limit: 5, ttl: 60000 } })
+  @Post('login')
+  @ApiOperation({ summary: 'Đăng nhập với username và mật khẩu' })
+  @ApiResponse({ status: 200, description: 'Đăng nhập thành công' })
+  @ApiResponse({ status: 401, description: 'Thông tin đăng nhập không hợp lệ' })
+  async login(@Body() loginDto: LoginDTO, @Req() req: any) {
+    try {
+      const result = await this.authService.login(loginDto, req);
+      return {
+        status: 'success',
+        message: 'Đăng nhập thành công',
+        data: result,
+      };
+    } catch (error) {
+      return {
+        status: 'fail',
+        message: error,
+      };
     }
   }
 

@@ -22,7 +22,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
 
   async validate(req: Request, payload: JwtPayload) {
     try {
-      // Lấy token từ header
+    
       const token = req.headers['authorization']?.split(' ')[1];
       if (!token) {
         throw new UnauthorizedException('No token provided');

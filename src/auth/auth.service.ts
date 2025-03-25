@@ -60,17 +60,6 @@ export class AuthService {
     return {
       access_token: accessToken,
       refresh_token: refreshToken,
-      account: {
-        id: account.id,
-        email: account.email,
-        username: account.username,
-        role: account.role,
-      },
-      profile: {
-        id: account.profile?.id || '',
-        name: account.profile?.name || '',
-        avatar: account.profile?.avatar || '',
-      },
     };
   }
 
@@ -224,64 +213,11 @@ export class AuthService {
     }
   }
 
-  private getIP(ip: string): string {
-    // Nếu không có IP, trả về unknown
-    if (!ip) return 'unknown';
 
-    // Xử lý IPv4-mapped IPv6 (::ffff:127.0.0.1)
-    if (ip.includes('::ffff:')) {
-      return ip.split('::ffff:')[1];
-    }
-
-    // Xử lý localhost IPv6 (::1)
-    if (ip === '::1') {
-      return '127.0.0.1';
-    }
-    // Trường hợp IPv6 khác, giữ nguyên
-    // Hoặc IPv4 thuần túy, giữ nguyên
-    return ip;
-  }
-
-  private generateFingerprint(req: any): string {
-    // Thu thập thông tin từ request
-    const userAgent = req.headers['user-agent'] || '';
-
-    // Xử lý nhiều nguồn IP khác nhau
-    let ip = 'unknown';
-
-    // Thứ tự ưu tiên các nguồn IP
-    const IPs = [
-      req.headers['x-forwarded-for'],
-      req.headers['x-real-ip'],
-      req.ip,
-      req.connection?.remoteAddress,
-    ];
-
-    // Lấy IP đầu tiên không phải undefined hoặc null
-    for (const IP of IPs) {
-      if (IP) {
-        const extractedIP = Array.isArray(IP)
-          ? IP[0]
-          : typeof IP === 'string' && IP.includes(',')
-            ? IP.split(',')[0].trim()
-            : IP;
-
-        ip = this.getIP(extractedIP);
-        break;
-      }
-    }
-
-    this.logger.debug(`User-Agent: ${userAgent}, IP: ${ip}`);
-
-    return crypto
-      .createHash('sha256')
-      .update(`${userAgent}:${ip}`)
-      .digest('hex');
-  }
 
   async generateRefreshToken(
     account: Account,
-    req: any,
+    req: Request,
     existingToken?: string,
   ): Promise<string> {
     try {
@@ -328,7 +264,10 @@ export class AuthService {
         secret: process.env.JWT_REFRESH_SECRET,
         expiresIn,
       });
-      const fingerprint = this.generateFingerprint(req);
+
+      const fingerprint = Array.isArray(req.headers["x-device-id"])
+                          ? req.headers["x-device-id"][0]
+                          : "";
       // Tạo một session key duy nhất cho account
       const sessionKey = `refresh_token:${account.id}:${tokenId}`;
 
@@ -385,7 +324,9 @@ export class AuthService {
 
       const sessionKey = `refresh_token:${payload.sub}:${payload.jti}`;
       const storedTokenData = await this.redisService.get(sessionKey);
-      const currentFingerprint = this.generateFingerprint(req);
+      const currentFingerprint = Array.isArray(req.headers["x-device-id"])
+      ? req.headers["x-device-id"][0]
+      : "";
       const parsedTokenData: RefreshTokenRedisPayload =
         JSON.parse(storedTokenData);
       if (parsedTokenData.fingerprint !== currentFingerprint) {

@@ -4,9 +4,9 @@ import {
   Get,
   Logger,
   Param,
-  Patch,
+  Put,
   Req,
-  UseGuards,
+  UseGuards
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -59,7 +59,7 @@ export class AccountController {
     };
   }
 
-  @Patch(':id/password')
+  @Put(':id/password')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Cập nhật mật khẩu tài khoản' })
