@@ -13,16 +13,22 @@ enum Role {
 }
 
 enum FriendshipStatus {
-  PENDING // Đang chờ xác nhận: Đã gửi lời mời kết bạn nhưng người nhận chưa phản hồi
-  ACCEPTED // Đã chấp nhận: Hai người đã là bạn bè
-  REJECTED // Đã từ chối: Lời mời kết bạn bị từ chối
-  BLOCKED // Đã chặn: Mối quan hệ bị chặn bởi một trong hai người
+  PENDING
+  ACCEPTED
+  REJECTED
+  BLOCKED
 }
 
 enum GroupRole {
-  OWNER // Nhóm trưởng
-  ADMIN // Nhóm phó
-  MEMBER // Thành viên
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum PostVisibility {
+  PUBLIC
+  FRIENDS
+  PRIVATE
 }
 
 model Account {
@@ -34,8 +40,6 @@ model Account {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   profile   Profile?
-
-  @@index([email, username])
 }
 
 model Profile {
@@ -49,54 +53,24 @@ model Profile {
   birthday  DateTime?
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
-  isSetup   Boolean?  @default(false)
+  isSetup   Boolean   @default(false)
 
-  // Mối quan hệ bạn bè
-  // Những lời mời kết bạn đã gửi đi (người dùng là người gửi)
-  sentFriendRequests     Friendship[] @relation("SenderRelation")
-  // Những lời mời kết bạn đã nhận được (người dùng là người nhận)
-  receivedFriendRequests Friendship[] @relation("ReceiverRelation")
-
-  // Danh sách bạn bè (đơn giản hóa)
-  friends Friend[]
-
-  // Posts and interactions
-  posts    Post[]
-  comments Comment[]
-  likes    Like[]
-
-  // Conversations
-  ownedConversations Conversation[]
-  participatedChats  ConversationParticipant[]
-  sentMessages       Message[]
-
-  @@index([accountId, phone])
-}
-
-// Model mới để lưu trữ danh sách bạn bè
-model Friend {
-  id           String   @id @default(auto()) @map("_id") @db.ObjectId
-  profile      Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
-  profileId    String   @db.ObjectId
-  friendId     String   @db.ObjectId
-  friendName   String?
-  friendAvatar String?
-  createdAt    DateTime @default(now())
-
-  @@unique([profileId, friendId])
-  // Tạo index để tìm kiếm bạn bè nhanh hơn
-  @@index([profileId])
+  sentFriendRequests     Friendship[]              @relation("SenderRelation")
+  receivedFriendRequests Friendship[]              @relation("ReceiverRelation")
+  posts                  Post[]
+  comments               Comment[]
+  likes                  Like[]
+  ownedConversations     Conversation[]            @relation("Owner")
+  participatedChats      ConversationParticipant[]
+  sentMessages           Message[]
 }
 
 model Friendship {
   id         String           @id @default(auto()) @map("_id") @db.ObjectId
-  // Người gửi lời mời kết bạn
   sender     Profile          @relation("SenderRelation", fields: [senderId], references: [id], onDelete: Cascade)
   senderId   String           @db.ObjectId
-  // Người nhận lời mời kết bạn
   receiver   Profile          @relation("ReceiverRelation", fields: [receiverId], references: [id], onDelete: Cascade)
   receiverId String           @db.ObjectId
-  // Trạng thái mối quan hệ: PENDING (đang chờ), ACCEPTED (đã chấp nhận), REJECTED (đã từ chối), BLOCKED (đã chặn)
   status     FriendshipStatus @default(PENDING)
   createdAt  DateTime         @default(now())
   updatedAt  DateTime         @updatedAt
@@ -107,16 +81,17 @@ model Friendship {
 }
 
 model Post {
-  id        String    @id @default(auto()) @map("_id") @db.ObjectId
-  author    Profile   @relation(fields: [authorId], references: [id], onDelete: Cascade)
-  authorId  String    @db.ObjectId
-  content   String?
-  image     String[]
-  video     String?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  comments  Comment[]
-  likes     Like[]
+  id         String         @id @default(auto()) @map("_id") @db.ObjectId
+  author     Profile        @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  authorId   String         @db.ObjectId
+  content    String?
+  images     String[]       @default([])
+  video      String?
+  visibility PostVisibility @default(PUBLIC)
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+  comments   Comment[]
+  likes      Like[]
 
   @@index([authorId, createdAt(sort: Desc)])
 }
@@ -129,6 +104,7 @@ model Comment {
   authorId  String   @db.ObjectId
   content   String
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([postId, createdAt(sort: Desc)])
   @@index([authorId])
@@ -150,12 +126,13 @@ model Like {
 model Conversation {
   id            String                    @id @default(auto()) @map("_id") @db.ObjectId
   name          String?
-  isGroup       Boolean                   @default(false) // Nhóm chat hay chat riêng?
-  owner         Profile                   @relation(fields: [ownerId], references: [id], onDelete: Cascade)
-  ownerId       String                    @db.ObjectId // Lưu nhóm trưởng
+  isGroup       Boolean                   @default(false)
+  owner         Profile                   @relation("Owner", fields: [ownerId], references: [id], onDelete: Cascade)
+  ownerId       String                    @db.ObjectId
   participants  ConversationParticipant[]
   messages      Message[]
-  lastMessageId String?                   @db.ObjectId
+  lastMessage   Message?                  @relation("LastMessage", fields: [lastMessageId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  lastMessageId String?                   @unique @db.ObjectId // Added @unique here
   createdAt     DateTime                  @default(now())
   updatedAt     DateTime                  @updatedAt
 
@@ -177,18 +154,30 @@ model ConversationParticipant {
 }
 
 model Message {
-  id             String       @id @default(auto()) @map("_id") @db.ObjectId
-  sender         Profile      @relation(fields: [senderId], references: [id], onDelete: Cascade)
-  senderId       String       @db.ObjectId
-  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  conversationId String       @db.ObjectId
+  id             String        @id @default(auto()) @map("_id") @db.ObjectId
+  sender         Profile       @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  senderId       String        @db.ObjectId
+  conversation   Conversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  conversationId String        @db.ObjectId
   content        String?
   fileUrl        String?
   fileType       String?
-  isRead         Boolean      @default(false)
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  readBy         ReadReceipt[]
+  lastInConv     Conversation? @relation("LastMessage")
 
   @@index([conversationId, createdAt(sort: Desc)])
   @@index([senderId])
+}
+
+model ReadReceipt {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  messageId String   @db.ObjectId
+  userId    String   @db.ObjectId
+  readAt    DateTime @default(now())
+
+  @@unique([messageId, userId])
+  @@index([messageId])
 }

@@ -3,9 +3,9 @@ import {
   Controller,
   Get,
   Param,
-  Patch,
+  Put,
   Req,
-  UseGuards,
+  UseGuards
 } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/auth.guard';
@@ -37,7 +37,7 @@ export class ProfileController {
   }
 
   @UseGuards(JwtAuthGuard)
-  @Patch('me')
+  @Put('me')
   @ApiOperation({ summary: 'Cập nhật profile của người dùng hiện tại' })
   @ApiResponse({ status: 200, description: 'Cập nhật thành công' })
   @ApiResponse({ status: 401, description: 'Không có quyền truy cập' })
