@@ -1,20 +1,17 @@
-import { ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
-import { AuthGuard } from '@nestjs/passport';
+import { ExecutionContext, UnauthorizedException } from "@nestjs/common";
+import { AuthGuard } from "@nestjs/passport";
 
-@Injectable()
 export class JwtAuthGuard extends AuthGuard('jwt') {
   handleRequest(err: any, account: any) {
     if (err || !account) {
-      throw new UnauthorizedException(
-        'Not Permission: Invalid or expired JWT token',
-      );
+      const errorMessage = err?.message || 'Invalid or expired JWT token';
+      throw new UnauthorizedException(`Not Permission: ${errorMessage}`);
     }
     return account;
   }
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const result = (await super.canActivate(context)) as boolean;
-
     const request = context.switchToHttp().getRequest();
 
     if (request.user) {

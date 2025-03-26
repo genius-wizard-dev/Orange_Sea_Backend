@@ -1,34 +1,25 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule, ConfigService } from '@nestjs/config';
-import { JwtModule } from '@nestjs/jwt';
-import { PassportModule } from '@nestjs/passport';
-import { PrismaModule } from '../prisma/prisma.module';
+import { ConfigModule } from '@nestjs/config';
+import { PrismaModule } from 'src/config/prisma/prisma.module';
+import { ResendModule } from 'src/config/resend/resend.module';
+
+import { TokenModule } from 'src/token/token.module';
 import { ProfileModule } from '../profile/profile.module';
-import { RedisModule } from '../redis/redis.module';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
-import { JwtRefreshStrategy } from './jwt.refresh.strategy';
-import { JwtStrategy } from './jwt.strategy';
+import { RedisModule } from 'src/config/redis/redis.module';
 
 @Module({
   imports: [
-    PassportModule,
-    RedisModule,
+    ConfigModule,
     ProfileModule,
     PrismaModule,
-    JwtModule.registerAsync({
-      imports: [ConfigModule],
-      inject: [ConfigService],
-      useFactory: async (configService: ConfigService) => ({
-        secret: configService.get<string>('JWT_ACCESS_SECRET'),
-        signOptions: {
-          expiresIn: configService.get<string>('JWT_ACCESS_EXPIRES_IN', '15m'),
-        },
-      }),
-    }),
+    ResendModule,
+    TokenModule,
+    RedisModule,
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy, JwtRefreshStrategy],
+  providers: [AuthService],
   exports: [AuthService],
 })
 export class AuthModule {}
