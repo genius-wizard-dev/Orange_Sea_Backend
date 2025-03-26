@@ -1,15 +1,15 @@
 import {
-  Injectable,
-  Logger,
-  NotFoundException,
-  UnauthorizedException,
+    Injectable,
+    Logger,
+    NotFoundException,
+    UnauthorizedException,
 } from '@nestjs/common';
 import { Account } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
-import { PrismaService } from 'src/prisma/prisma.service';
+import { PrismaService } from 'src/config/prisma/prisma.service';
 import {
-  AccountResponseDto,
-  AccountWithProfileResponseDto,
+    AccountResponseDto,
+    AccountWithProfileResponseDto,
 } from './dto/account.response.dto';
 import { UpdatePasswordDTO } from './dto/update.account.dto';
 

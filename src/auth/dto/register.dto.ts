@@ -2,7 +2,7 @@ import { ApiProperty } from '@nestjs/swagger';
 import { Role } from '@prisma/client';
 import { IsEmail, IsEnum, IsOptional, IsString, Length } from 'class-validator';
 
-export class RegisterDto {
+export class RegisterDTO {
   @ApiProperty({ description: 'Tên đăng nhập', minLength: 5, maxLength: 50 })
   @IsString()
   @Length(5, 50)
@@ -22,18 +22,20 @@ export class RegisterDto {
   @Length(5, 50)
   password: string;
 
+
   @ApiProperty({
-    description: 'Vai trò người dùng',
+    description: 'Vai trò của người dùng',
     enum: Role,
     default: Role.USER,
-    required: false,
   })
   @IsEnum(Role)
   @IsOptional()
   role?: Role;
 }
 
-export class RegisterResponseDto {
+
+
+export class RegisterResponseDTO {
   @ApiProperty({
     description: 'ID của tài khoản',
   })
@@ -53,4 +55,44 @@ export class RegisterResponseDto {
     description: 'ID của profile',
   })
   profileId: string;
+}
+
+export class RegisterResponse {
+  @ApiProperty({
+    description: 'Địa chỉ email đã đăng ký',
+  })
+  email: string;
+
+  @ApiProperty({
+    description: 'Trạng thái đang chờ xác thực OTP',
+    example: true,
+  })
+  isPending: boolean;
+
+  @ApiProperty({
+    description: 'Thông báo kết quả',
+    required: false,
+    example: 'OTP đã được gửi thành công',
+  })
+  message?: string;
+}
+
+export class RegisterPendingDataDTO extends RegisterDTO{
+  otp: string
+}
+
+
+export class RegisterOtpVerifyDTO {
+  @ApiProperty({ description: 'Email đăng ký' })
+  @IsEmail()
+  email: string;
+
+  @ApiProperty({ description: 'Mã OTP' })
+  otp: string;
+}
+
+export class ResendOtpDto {
+  @ApiProperty({ description: 'Email đăng ký' })
+  @IsEmail()
+  email: string;
 }
