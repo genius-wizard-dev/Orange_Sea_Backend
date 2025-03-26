@@ -1,5 +1,5 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { PrismaService } from 'src/prisma/prisma.service';
+import { PrismaService } from 'src/config/prisma/prisma.service';
 import { UpdateProfileDTO } from './dto/update.profile.dto';
 
 @Injectable()
@@ -79,7 +79,7 @@ export class ProfileService {
           birthday: updateProfileDTO.birthday
             ? new Date(updateProfileDTO.birthday)
             : undefined,
-   
+
         },
       });
 

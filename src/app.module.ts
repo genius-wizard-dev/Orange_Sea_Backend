@@ -3,12 +3,14 @@ import { ConfigModule } from '@nestjs/config';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { AccountModule } from './account/account.module';
 import { AuthModule } from './auth/auth.module';
-import { FcmModule } from './firebase/fcm.module';
-import { ProfileModule } from './profile/profile.module';
-import { RedisModule } from './redis/redis.module';
 import { ChatController } from './chat/chat.controller';
-import { ChatService } from './chat/chat.service';
 import { ChatModule } from './chat/chat.module';
+import { ChatService } from './chat/chat.service';
+import { RedisModule } from './config/redis/redis.module';
+import { ResendModule } from './config/resend/resend.module';
+import { FcmModule } from './config/firebase/fcm.module';
+import { ProfileModule } from './profile/profile.module';
+import { TokenModule } from './token/token.module';
 
 @Module({
   imports: [
@@ -27,6 +29,8 @@ import { ChatModule } from './chat/chat.module';
     ProfileModule,
     FcmModule,
     ChatModule,
+    TokenModule,
+    ResendModule,
   ],
   controllers: [ChatController],
   providers: [ChatService],
