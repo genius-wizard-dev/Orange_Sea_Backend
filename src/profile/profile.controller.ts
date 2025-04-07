@@ -5,10 +5,10 @@ import {
   Param,
   Put,
   Req,
-  UseGuards
+  UseGuards,
 } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { JwtAuthGuard } from '../auth/auth.guard';
+import { JwtAuthGuard } from '../auth/guards/auth.guard';
 import { UpdateProfileDTO } from './dto/update.profile.dto';
 import { ProfileService } from './profile.service';
 @ApiTags('profile')

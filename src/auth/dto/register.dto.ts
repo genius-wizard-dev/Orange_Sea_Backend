@@ -22,7 +22,6 @@ export class RegisterDTO {
   @Length(5, 50)
   password: string;
 
-
   @ApiProperty({
     description: 'Vai trò của người dùng',
     enum: Role,
@@ -32,8 +31,6 @@ export class RegisterDTO {
   @IsOptional()
   role?: Role;
 }
-
-
 
 export class RegisterResponseDTO {
   @ApiProperty({
@@ -75,12 +72,17 @@ export class RegisterResponse {
     example: 'OTP đã được gửi thành công',
   })
   message?: string;
+  @ApiProperty({
+    description: 'Key',
+    required: false,
+    example: 'Gửi key',
+  })
+  key?: string;
 }
 
-export class RegisterPendingDataDTO extends RegisterDTO{
-  otp: string
+export class RegisterPendingDataDTO extends RegisterDTO {
+  otp: string;
 }
-
 
 export class RegisterOtpVerifyDTO {
   @ApiProperty({ description: 'Email đăng ký' })
