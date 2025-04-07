@@ -6,7 +6,7 @@ import {
   Param,
   Put,
   Req,
-  UseGuards
+  UseGuards,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -14,7 +14,7 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import { JwtAuthGuard } from 'src/auth/auth.guard';
+import { JwtAuthGuard } from 'src/auth/guards/auth.guard';
 import { AccountService } from './account.service';
 import { UpdatePasswordDTO } from './dto/update.account.dto';
 @ApiTags('account')

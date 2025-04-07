@@ -1,4 +1,9 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from 'src/config/prisma/prisma.service';
 import { UpdateProfileDTO } from './dto/update.profile.dto';
 
@@ -56,14 +61,18 @@ export class ProfileService {
       throw new NotFoundException('Không tìm thấy profile');
     }
 
-    // Kiểm tra số điện thoại đã tồn tại chưa (nếu có)
     if (updateProfileDTO.phone) {
-      const existingPhone = await this.prismaService.profile.findUnique({
-        where: { phone: updateProfileDTO.phone },
+      const existingPhone = await this.prismaService.profile.findFirst({
+        where: {
+          phone: updateProfileDTO.phone,
+          NOT: {
+            id: existingProfile.id, // loại trừ profile hiện tại
+          },
+        },
       });
 
-      if (existingPhone && existingPhone.id !== existingProfile.id) {
-        throw new Error('Số điện thoại đã được sử dụng');
+      if (existingPhone) {
+        throw new BadRequestException('Số điện thoại đã được sử dụng');
       }
     }
 
@@ -79,7 +88,6 @@ export class ProfileService {
           birthday: updateProfileDTO.birthday
             ? new Date(updateProfileDTO.birthday)
             : undefined,
-
         },
       });
 

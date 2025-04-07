@@ -8,7 +8,6 @@ export class LoginDTO {
     maximum: 50,
     required: false,
   })
-
   @IsString()
   @Length(5, 50)
   @IsOptional()
@@ -33,7 +32,6 @@ export class LoginDTO {
   @IsString()
   @Length(5, 50)
   password: string;
-
 }
 
 export class LoginUserResponseDto {
