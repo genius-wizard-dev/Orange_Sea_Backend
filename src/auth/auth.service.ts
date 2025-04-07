@@ -3,7 +3,7 @@ import {
   ConflictException,
   Injectable,
   Logger,
-  UnauthorizedException
+  UnauthorizedException,
 } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
@@ -14,7 +14,13 @@ import { ResendService } from 'src/config/resend/resend.service';
 import { TokenService } from 'src/token/token.service';
 import { ForgotPasswordDTO, ResetPasswordDTO } from './dto/forgot.password.dto';
 import { LoginDTO, LoginUserResponseDto } from './dto/login.dto';
-import { RegisterDTO, RegisterOtpVerifyDTO, RegisterPendingDataDTO, RegisterResponse, RegisterResponseDTO } from './dto/register.dto';
+import {
+  RegisterDTO,
+  RegisterOtpVerifyDTO,
+  RegisterPendingDataDTO,
+  RegisterResponse,
+  RegisterResponseDTO,
+} from './dto/register.dto';
 
 @Injectable()
 export class AuthService {
@@ -24,14 +30,14 @@ export class AuthService {
     private readonly prismaService: PrismaService,
     private readonly redisService: RedisService,
     private readonly tokenService: TokenService,
-    private readonly resendService: ResendService
+    private readonly resendService: ResendService,
   ) {}
 
   async login(
     loginData: LoginDTO,
     deviceId: string,
     fcmToken: string,
-    ip: any
+    ip: any,
   ): Promise<LoginUserResponseDto | null> {
     try {
       const { username, password } = loginData;
@@ -52,7 +58,12 @@ export class AuthService {
       }
 
       // Tạo tokens và lưu thông tin thiết bị
-      const refreshToken = await this.tokenService.generateRefreshToken({account, deviceId, ip, fcmToken});
+      const refreshToken = await this.tokenService.generateRefreshToken({
+        account,
+        deviceId,
+        ip,
+        fcmToken,
+      });
       if (!refreshToken) {
         return null;
       }
@@ -61,7 +72,7 @@ export class AuthService {
 
       return {
         access_token: accessToken,
-        refresh_token: refreshToken
+        refresh_token: refreshToken,
       };
     } catch (error) {
       this.logger.error(`Lỗi đăng nhập: ${error.message}`, error.stack);
@@ -88,14 +99,17 @@ export class AuthService {
     }
 
     // Kiểm tra xem email đã trong hàng đợi đăng ký chưa
-    const pendingRegistration = await this.redisService.get(`register:${data.email}`);
+    const pendingRegistration = await this.redisService.get(
+      `register:${data.email}`,
+    );
     if (pendingRegistration) {
       const timeLeft = await this.redisService.ttl(`register:${data.email}`);
-
+      const key = await this.redisService.get(`verify:${data.email}`);
       if (timeLeft > 120) {
         return {
           email: data.email,
-          isPending: true
+          isPending: true,
+          key: key,
         };
       }
 
@@ -105,20 +119,31 @@ export class AuthService {
     const hashedPassword = await bcrypt.hash(data.password, 10);
 
     const otp = this.generateOTP();
+    // Tạo dữ liệu đăng ký và lưu vào Redis
+    const registrationData = {
+      username: data.username,
+      email: data.email,
+      password: hashedPassword,
+      role: data.role,
+      otp,
+      createdAt: new Date().toISOString(),
+    };
 
-    await this.redisService.setex(
+    // Lưu thông tin đăng ký vào Redis với email làm key
+    await this.redisService.set(
       `register:${data.email}`,
-      {
-        username: data.username,
-        email: data.email,
-        password: hashedPassword,
-        role: data.role,
-        otp,
-        createdAt: new Date().toISOString(),
-      },
-      360,
+      registrationData,
+      300, // Time to live: 5 minutes (300 seconds)
     );
 
+    // Tạo một random key cho xác thực bổ sung nếu cần
+    const verificationKey = crypto.randomBytes(16).toString('hex');
+    // Lưu key ngẫu nhiên với reference đến email
+    await this.redisService.set(
+      `verify:${data.email}`,
+      verificationKey,
+      300, // Time to live: 5 minutes
+    );
 
     try {
       // Gửi email OTP sử dụng ResendService
@@ -126,19 +151,33 @@ export class AuthService {
     } catch (error) {
       this.logger.error(`Lỗi khi gửi email: ${error.message}`, error.stack);
       await this.redisService.del(`register:${data.email}`);
-      throw new BadRequestException('Không thể gửi email xác minh. Vui lòng thử lại sau.');
+      throw new BadRequestException(
+        'Không thể gửi email xác minh. Vui lòng thử lại sau.',
+      );
     }
 
     return {
       email: data.email,
-      isPending: false
+      isPending: true,
+      key: verificationKey,
     };
+  }
+  async CheckRegister(data: { key: string; email: string }): Promise<boolean> {
+    try {
+      const keyCheck = await this.redisService.get(`verify:${data.email}`);
+      if (keyCheck && keyCheck === data.key) {
+        return true;
+      }
+      return false;
+    } catch (error) {
+      throw new Error('Permission denined');
+    }
   }
 
   private async retry<T>(
     operation: () => Promise<T>,
     maxRetries: number = 3,
-    delay: number = 1000
+    delay: number = 1000,
   ): Promise<T> {
     let lastError: Error = new Error('Unknown error occurred');
 
@@ -149,8 +188,10 @@ export class AuthService {
         lastError = error;
         if (attempt === maxRetries) break;
 
-        this.logger.warn(`Lần thử ${attempt}/${maxRetries} thất bại, thử lại sau ${delay}ms`);
-        await new Promise(resolve => setTimeout(resolve, delay));
+        this.logger.warn(
+          `Lần thử ${attempt}/${maxRetries} thất bại, thử lại sau ${delay}ms`,
+        );
+        await new Promise((resolve) => setTimeout(resolve, delay));
       }
     }
 
@@ -158,15 +199,23 @@ export class AuthService {
   }
 
   async verifyOTP(data: RegisterOtpVerifyDTO): Promise<RegisterResponseDTO> {
-
-    const registerPendingData: RegisterPendingDataDTO | null = await this.redisService.get<RegisterPendingDataDTO>(`register:${data.email}`);
+    const registerPendingData: RegisterPendingDataDTO | null =
+      await this.redisService.get<RegisterPendingDataDTO>(
+        `register:${data.email}`,
+      );
     if (!registerPendingData) {
-      this.logger.warn(`Không tìm thấy thông tin đăng ký cho email: ${data.email}`);
-      throw new BadRequestException('Thông tin đăng ký không tồn tại hoặc đã hết hạn');
+      this.logger.warn(
+        `Không tìm thấy thông tin đăng ký cho email: ${data.email}`,
+      );
+      throw new BadRequestException(
+        'Thông tin đăng ký không tồn tại hoặc đã hết hạn',
+      );
     }
 
     if (registerPendingData.otp !== data.otp) {
-      this.logger.warn(`OTP không khớp cho email: ${data.email}. OTP nhập: ${data.otp}, OTP lưu: ${registerPendingData.otp}`);
+      this.logger.warn(
+        `OTP không khớp cho email: ${data.email}. OTP nhập: ${data.otp}, OTP lưu: ${registerPendingData.otp}`,
+      );
       throw new BadRequestException('Mã OTP không chính xác');
     }
 
@@ -193,12 +242,17 @@ export class AuthService {
         });
       });
 
-      this.logger.debug(`Tạo tài khoản thành công: ${JSON.stringify(result, null, 2)}`);
+      this.logger.debug(
+        `Tạo tài khoản thành công: ${JSON.stringify(result, null, 2)}`,
+      );
 
       // Xóa dữ liệu tạm trong Redis
       await this.redisService.del(`register:${data.email}`);
-      this.logger.debug(`Đã xóa dữ liệu tạm trong Redis cho email: ${data.email}`);
+      await this.redisService.del(`verify:${data.email}`);
 
+      this.logger.debug(
+        `Đã xóa dữ liệu tạm trong Redis cho email: ${data.email}`,
+      );
 
       return {
         accountId: result.account.id,
@@ -208,7 +262,9 @@ export class AuthService {
       };
     } catch (error) {
       this.logger.error(`Lỗi khi tạo tài khoản: ${error.message}`, error.stack);
-      throw new BadRequestException('Không thể tạo tài khoản. Vui lòng thử lại sau.');
+      throw new BadRequestException(
+        'Không thể tạo tài khoản. Vui lòng thử lại sau.',
+      );
     }
   }
 
@@ -230,7 +286,9 @@ export class AuthService {
             !errorMessage.includes('invalid access token') &&
             !errorMessage.includes('token has been revoked')
           ) {
-            this.logger.warn(`Không thể thu hồi access token: ${error.message}`);
+            this.logger.warn(
+              `Không thể thu hồi access token: ${error.message}`,
+            );
             throw error; // Ném lỗi nếu không phải các trường hợp thông thường
           }
         }
@@ -279,14 +337,21 @@ export class AuthService {
     try {
       // Gửi email reset password sử dụng ResendService
       await this.resendService.sendPasswordResetEmail(account.email, resetLink);
-      this.logger.debug(`Email reset mật khẩu đã được gửi thành công đến ${account.email}`);
+      this.logger.debug(
+        `Email reset mật khẩu đã được gửi thành công đến ${account.email}`,
+      );
     } catch (error) {
-      this.logger.error(`Lỗi khi gửi email reset mật khẩu: ${error.message}`, error.stack);
+      this.logger.error(
+        `Lỗi khi gửi email reset mật khẩu: ${error.message}`,
+        error.stack,
+      );
       await Promise.all([
         this.redisService.del(`reset_token:${resetToken}`),
         this.redisService.del(`reset_pending:${account.id}`),
       ]);
-      throw new BadRequestException('Không thể gửi email reset mật khẩu. Vui lòng thử lại sau.');
+      throw new BadRequestException(
+        'Không thể gửi email reset mật khẩu. Vui lòng thử lại sau.',
+      );
     }
   }
 
@@ -328,18 +393,25 @@ export class AuthService {
   }
 
   async resendOTP(email: string): Promise<{ email: string }> {
-    const pendingRegistration = await this.redisService.get(`register:${email}`);
+    const pendingRegistration = await this.redisService.get(
+      `register:${email}`,
+    );
 
     if (!pendingRegistration) {
-      throw new BadRequestException('Thời gian đăng ký hết hạn vui lòng đăng ký lại');
+      throw new BadRequestException(
+        'Thời gian đăng ký hết hạn vui lòng đăng ký lại',
+      );
     }
 
     const parsedData = JSON.parse(pendingRegistration);
     const timeLeft = await this.redisService.ttl(`register:${email}`);
 
     // Kiểm tra xem đã đủ 2 phút chưa
-    if (timeLeft > 180) { // 300 - 120 = 180 (còn hơn 2 phút)
-      throw new BadRequestException('Vui lòng đợi 2 phút trước khi yêu cầu gửi lại OTP');
+    if (timeLeft > 180) {
+      // 300 - 120 = 180 (còn hơn 2 phút)
+      throw new BadRequestException(
+        'Vui lòng đợi 2 phút trước khi yêu cầu gửi lại OTP',
+      );
     }
 
     // Tạo OTP mới
@@ -352,7 +424,7 @@ export class AuthService {
     await this.redisService.setex(
       `register:${email}`,
       JSON.stringify(parsedData),
-      300 // Reset TTL về 5 phút
+      300, // Reset TTL về 5 phút
     );
 
     try {
@@ -360,7 +432,9 @@ export class AuthService {
       await this.resendService.sendOTPEmail(email, newOTP);
     } catch (error) {
       this.logger.error(`Lỗi khi gửi lại email: ${error.message}`, error.stack);
-      throw new BadRequestException('Không thể gửi lại email xác minh. Vui lòng thử lại sau.');
+      throw new BadRequestException(
+        'Không thể gửi lại email xác minh. Vui lòng thử lại sau.',
+      );
     }
 
     return { email };

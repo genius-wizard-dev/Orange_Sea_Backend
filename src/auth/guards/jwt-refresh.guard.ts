@@ -1,10 +1,15 @@
-import { ExecutionContext, UnauthorizedException } from "@nestjs/common";
-import { AuthGuard } from "@nestjs/passport";
+import {
+  ExecutionContext,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
+import { AuthGuard } from '@nestjs/passport';
 
-export class JwtAuthGuard extends AuthGuard('jwt') {
+@Injectable()
+export class JwtRefreshGuard extends AuthGuard('jwt-refresh') {
   handleRequest(err: any, account: any) {
     if (err || !account) {
-      const errorMessage = err?.message || 'Invalid or expired JWT token';
+      const errorMessage = err?.message || 'Invalid or expired refresh token';
       throw new UnauthorizedException(`Not Permission: ${errorMessage}`);
     }
     return account;
@@ -16,7 +21,6 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
 
     if (request.user) {
       request.account = request.user;
-      delete request.user;
     }
 
     return result;
