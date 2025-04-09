@@ -29,6 +29,7 @@ export class ProfileService {
       bio: profile.bio || '',
       phone: profile.phone || '',
       birthday: profile.birthday || null,
+      isSetup: profile.isSetup || false,
     };
   }
 
