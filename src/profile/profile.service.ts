@@ -13,25 +13,25 @@ export class ProfileService {
 
   constructor(private readonly prismaService: PrismaService) {}
 
-  async getProfileByAccountId(accountId: string) {
-    const profile = await this.prismaService.profile.findFirst({
-      where: { accountId },
-    });
+  // async getProfileByAccountId(accountId: string) {
+  //   const profile = await this.prismaService.profile.findFirst({
+  //     where: { accountId },
+  //   });
 
-    if (!profile) {
-      throw new NotFoundException('Không tìm thấy profile');
-    }
+  //   if (!profile) {
+  //     throw new NotFoundException('Không tìm thấy profile');
+  //   }
 
-    return {
-      id: profile.id,
-      name: profile.name || '',
-      avatar: profile.avatar || '',
-      bio: profile.bio || '',
-      phone: profile.phone || '',
-      birthday: profile.birthday || null,
-      isSetup: profile.isSetup || false,
-    };
-  }
+  //   return {
+  //     id: profile.id,
+  //     name: profile.name || '',
+  //     avatar: profile.avatar || '',
+  //     bio: profile.bio || '',
+  //     phone: profile.phone || '',
+  //     birthday: profile.birthday || null,
+  //     isSetup: profile.isSetup || false,
+  //   };
+  // }
 
   async getProfileById(id: string) {
     const profile = await this.prismaService.profile.findUnique({
