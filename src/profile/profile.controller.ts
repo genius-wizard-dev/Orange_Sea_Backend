@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Logger,
   Param,
   Put,
   Req,
@@ -14,6 +15,7 @@ import { ProfileService } from './profile.service';
 @ApiTags('profile')
 @Controller('profile')
 export class ProfileController {
+  private readonly logger = new Logger(ProfileController.name);
   constructor(private readonly profileService: ProfileService) {}
 
   @UseGuards(JwtAuthGuard)
@@ -23,8 +25,8 @@ export class ProfileController {
   @ApiResponse({ status: 401, description: 'Không có quyền truy cập' })
   async getMyProfile(@Req() req: any) {
     try {
-      const profile = await this.profileService.getProfileByAccountId(
-        req.account.id,
+      const profile = await this.profileService.getProfileById(
+        req.account.profileId,
       );
       return {
         status: 'success',

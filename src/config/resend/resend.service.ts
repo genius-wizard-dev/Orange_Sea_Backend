@@ -23,7 +23,10 @@ export class ResendService {
       await this.resend.apiKeys.list();
       this.logger.debug('Kết nối thành công đến dịch vụ Resend');
     } catch (error) {
-      this.logger.error(`Không thể kết nối đến dịch vụ Resend: ${error.message}`, error.stack);
+      this.logger.error(
+        `Không thể kết nối đến dịch vụ Resend: ${error.message}`,
+        error.stack,
+      );
     }
   }
 
@@ -57,15 +60,21 @@ export class ResendService {
 
       this.logger.debug(`Email OTP đã được gửi thành công đến ${email}`);
     } catch (error) {
-      this.logger.error(`Lỗi khi gửi email OTP đến ${email}: ${error.message}`, error.stack);
+      this.logger.error(
+        `Lỗi khi gửi email OTP đến ${email}: ${error.message}`,
+        error.stack,
+      );
       throw error;
     }
   }
 
-  async sendPasswordResetEmail(email: string, resetLink: string): Promise<void> {
+  async sendPasswordResetEmail(
+    email: string,
+    resetLink: string,
+  ): Promise<void> {
     try {
       await this.resend.emails.send({
-        from: 'Orange Sea <no-reply@orangesea.io.vn>',
+        from: 'Orange Sea <no-reply@nonegroup.io.vn>',
         to: email,
         subject: 'Reset mật khẩu Orange Sea',
         html: `
@@ -108,9 +117,14 @@ export class ResendService {
         `,
       });
 
-      this.logger.debug(`Email reset mật khẩu đã được gửi thành công đến ${email}`);
+      this.logger.debug(
+        `Email reset mật khẩu đã được gửi thành công đến ${email}`,
+      );
     } catch (error) {
-      this.logger.error(`Lỗi khi gửi email reset mật khẩu đến ${email}: ${error.message}`, error.stack);
+      this.logger.error(
+        `Lỗi khi gửi email reset mật khẩu đến ${email}: ${error.message}`,
+        error.stack,
+      );
       throw error;
     }
   }

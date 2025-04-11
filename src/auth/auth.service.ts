@@ -332,7 +332,7 @@ export class AuthService {
     ]);
 
     // Tạo link reset password
-    const resetLink = `http://localhost:3000/reset-password?token=${resetToken}`;
+    const resetLink = `http://localhost:3000/reset/${resetToken}`;
 
     try {
       // Gửi email reset password sử dụng ResendService
