@@ -235,6 +235,7 @@ export class AuthService {
           const profile = await prisma.profile.create({
             data: {
               accountId: account.id,
+              name: `User${Math.floor(Math.random() * 10000)}`,
             },
           });
 

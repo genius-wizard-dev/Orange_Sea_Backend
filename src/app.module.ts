@@ -6,9 +6,11 @@ import { AuthModule } from './auth/auth.module';
 import { ChatController } from './chat/chat.controller';
 import { ChatModule } from './chat/chat.module';
 import { ChatService } from './chat/chat.service';
+import { CloudinaryModule } from './config/cloudinary/cloudinary.module';
+import { CloudinaryService } from './config/cloudinary/cloudinary.service';
+import { FcmModule } from './config/firebase/fcm.module';
 import { RedisModule } from './config/redis/redis.module';
 import { ResendModule } from './config/resend/resend.module';
-import { FcmModule } from './config/firebase/fcm.module';
 import { ProfileModule } from './profile/profile.module';
 import { TokenModule } from './token/token.module';
 
@@ -31,8 +33,9 @@ import { TokenModule } from './token/token.module';
     ChatModule,
     TokenModule,
     ResendModule,
+    CloudinaryModule,
   ],
   controllers: [ChatController],
-  providers: [ChatService],
+  providers: [ChatService, CloudinaryService],
 })
 export class AppModule {}
