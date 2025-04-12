@@ -46,6 +46,7 @@ export class ProfileService {
       birthday: profile.birthday || null,
       email: account.email || '',
       username: account.username || '',
+      accountID: profile.accountId || '',
     };
   }
 
