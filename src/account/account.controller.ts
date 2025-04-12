@@ -69,22 +69,30 @@ export class AccountController {
     @Body() updatePassword: UpdatePasswordDTO,
     @Req() req: any, // req.account contains decoded JWT payload after JwtAuthGuard processes the request
   ) {
-    this.logger.debug('Account object:', req.account);
-    this.logger.debug(`ID param: ${id}`);
+    try {
+      this.logger.debug('Account object:', req.account);
+      this.logger.debug(`ID param: ${id}`);
 
-    if (req.account.id !== id && req.account.role !== 'ADMIN') {
+      if (req.account.id !== id && req.account.role !== 'ADMIN') {
+        return {
+          status: 'error',
+          message: 'Bạn chỉ có thể cập nhật tài khoản của chính mình',
+        };
+      }
+
+      await this.accountService.updateAccount(id, updatePassword);
+      return {
+        status: 'success',
+        message: 'Cập nhật mật khẩu thành công',
+      };
+    } catch (error) {
+      this.logger.error(`Failed to update password: ${error.message}`);
       return {
         status: 'error',
-        message: 'Bạn chỉ có thể cập nhật tài khoản của chính mình',
+        message: 'Cập nhật mật khẩu thất bại',
+        // error: error.message,
       };
     }
-
-    const result = await this.accountService.updateAccount(id, updatePassword);
-    return {
-      status: 'success',
-      message: 'Cập nhật mật khẩu thành công',
-      data: result,
-    };
   }
 
   // @Delete(':id')
