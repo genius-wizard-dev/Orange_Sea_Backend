@@ -47,6 +47,7 @@ export class ProfileService {
       email: account.email || '',
       username: account.username || '',
       accountID: profile.accountId || '',
+      isSetup: profile.isSetup || false,
     };
   }
 
@@ -132,6 +133,7 @@ export class ProfileService {
           birthday: updateProfileDTO.birthday
             ? new Date(updateProfileDTO.birthday)
             : undefined,
+          isSetup: true,
         },
       });
 
