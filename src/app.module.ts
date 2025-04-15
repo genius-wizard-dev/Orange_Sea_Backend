@@ -11,6 +11,7 @@ import { CloudinaryService } from './config/cloudinary/cloudinary.service';
 import { FcmModule } from './config/firebase/fcm.module';
 import { RedisModule } from './config/redis/redis.module';
 import { ResendModule } from './config/resend/resend.module';
+import { FriendshipModule } from './friendship/friendship.module';
 import { ProfileModule } from './profile/profile.module';
 import { TokenModule } from './token/token.module';
 
@@ -29,6 +30,7 @@ import { TokenModule } from './token/token.module';
     RedisModule,
     AccountModule,
     ProfileModule,
+    FriendshipModule,
     FcmModule,
     ChatModule,
     TokenModule,

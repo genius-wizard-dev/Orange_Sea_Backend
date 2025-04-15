@@ -1,5 +1,5 @@
 /* eslint-disable prettier/prettier */
-import { PrismaClient, Friendship } from '@prisma/client';
+import { Friendship, PrismaClient } from '@prisma/client';
 import { CreateFriendshipDto } from './dto/create-friendship.dto';
 
 export class FriendshipService {
@@ -9,7 +9,10 @@ export class FriendshipService {
     this.prisma = new PrismaClient();
   }
 
-  async sendFriendRequest(senderId: string, dto: CreateFriendshipDto): Promise<Friendship> {
+  async sendFriendRequest(
+    senderId: string,
+    dto: CreateFriendshipDto,
+  ): Promise<Friendship> {
     try {
       const senderProfile = await this.prisma.profile.findUnique({
         where: { accountId: senderId },
@@ -65,7 +68,19 @@ export class FriendshipService {
         },
         include: {
           sender: {
-            include: { account: true },
+            select: {
+              id: true,
+              name: true,
+              avatar: true,
+              bio: true,
+              account: {
+                select: {
+                  id: true,
+                  email: true,
+                  role: true,
+                },
+              },
+            },
           },
         },
       });
@@ -74,7 +89,49 @@ export class FriendshipService {
     }
   }
 
-  async handleFriendRequest(friendshipId: string, receiverId: string, action: 'ACCEPT' | 'REJECT'): Promise<void> {
+  async getSendingRequests(accountId: string): Promise<Friendship[]> {
+    try {
+      const senderProfile = await this.prisma.profile.findUnique({
+        where: { accountId },
+      });
+
+      if (!senderProfile) {
+        throw new Error('Người gửi không tồn tại');
+      }
+
+      return await this.prisma.friendship.findMany({
+        where: {
+          senderId: senderProfile.id,
+          status: 'PENDING',
+        },
+        include: {
+          receiver: {
+            select: {
+              id: true,
+              name: true,
+              avatar: true,
+              bio: true,
+              account: {
+                select: {
+                  id: true,
+                  email: true,
+                  role: true,
+                },
+              },
+            },
+          },
+        },
+      });
+    } finally {
+      await this.prisma.$disconnect();
+    }
+  }
+
+  async handleFriendRequest(
+    friendshipId: string,
+    receiverId: string,
+    action: 'ACCEPT' | 'REJECT',
+  ): Promise<void> {
     try {
       const receiverProfile = await this.prisma.profile.findUnique({
         where: { accountId: receiverId },
@@ -95,6 +152,67 @@ export class FriendshipService {
       await this.prisma.friendship.update({
         where: { id: friendshipId },
         data: { status: action === 'ACCEPT' ? 'ACCEPTED' : 'REJECTED' },
+      });
+    } finally {
+      await this.prisma.$disconnect();
+    }
+  }
+
+  async getFriends(accountId: string): Promise<any[]> {
+    try {
+      const profile = await this.prisma.profile.findUnique({
+        where: { accountId },
+      });
+
+      if (!profile) {
+        throw new Error('Người dùng không tồn tại');
+      }
+
+      const friendships = await this.prisma.friendship.findMany({
+        where: {
+          OR: [
+            { senderId: profile.id, status: 'ACCEPTED' },
+            { receiverId: profile.id, status: 'ACCEPTED' },
+          ],
+        },
+        include: {
+          sender: {
+            include: {
+              account: {
+                select: {
+                  email: true,
+                },
+              },
+            },
+          },
+          receiver: {
+            include: {
+              account: {
+                select: {
+                  email: true,
+                },
+              },
+            },
+          },
+        },
+      });
+
+      // Return only the friend's profile information with specific fields
+      return friendships.map((friendship) => {
+        const friendProfile =
+          friendship.senderId === profile.id
+            ? friendship.receiver
+            : friendship.sender;
+
+        return {
+          id: friendProfile.id,
+          name: friendProfile.name,
+          avatar: friendProfile.avatar,
+          bio: friendProfile.bio,
+          phone: friendProfile.phone,
+          birthday: friendProfile.birthday,
+          email: friendProfile.account.email,
+        };
       });
     } finally {
       await this.prisma.$disconnect();
