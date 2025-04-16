@@ -121,4 +121,39 @@ export class ProfileController {
       throw error;
     }
   }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('username/:username')
+  @ApiOperation({ summary: 'Tìm kiếm profile theo username' })
+  @ApiResponse({ status: 200, description: 'Tìm kiếm thành công' })
+  @ApiResponse({ status: 401, description: 'Không có quyền truy cập' })
+  @ApiResponse({ status: 404, description: 'Không tìm thấy profile' })
+  async findProfileByUsername(@Param('username') username: string) {
+    this.logger.debug(
+      `findProfileByUsername called with username: ${username}`,
+    );
+    try {
+      this.logger.debug(`Finding profile with username: ${username}`);
+      const result = await this.profileService.findByUsername(username);
+      const data = {
+        id: result.profile.id,
+        name: result.profile.name,
+        avatar: result.profile.avatar,
+      };
+      this.logger.debug(`Profile found successfully: ${JSON.stringify(data)}`);
+      return {
+        status: 'success',
+        message: 'Tìm kiếm profile thành công',
+        data: data,
+      };
+    } catch (error) {
+      this.logger.error(`Error in findProfileByUsername: ${error.message}`);
+      this.logger.error(error.stack);
+      return {
+        status: 'fail',
+        message: error.message,
+        data: {},
+      };
+    }
+  }
 }

@@ -1,7 +1,7 @@
 /* eslint-disable prettier/prettier */
 import { Module } from '@nestjs/common';
-import { FriendshipService } from './friendship.service';
-import { FriendshipController } from './friendship.controller';
+import { FriendshipController } from './friend.controller';
+import { FriendshipService } from './friend.service';
 
 @Module({
   controllers: [FriendshipController],
