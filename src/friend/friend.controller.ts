@@ -1,5 +1,3 @@
-/* eslint-disable prettier/prettier */
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import {
   Body,
   Controller,
@@ -14,16 +12,16 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { JwtAuthGuard } from 'src/auth/guards/auth.guard';
-import { CreateFriendshipDto } from './dto/create-friendship.dto';
-import { FriendshipService } from './friendship.service';
+import { CreateFriendshipDto } from './dto/create.friendship.dto';
+import { FriendshipService } from './friend.service';
 
-@Controller('friendship')
+@Controller('friend')
 export class FriendshipController {
   private readonly logger = new Logger(FriendshipController.name);
   constructor(private readonly friendshipService: FriendshipService) {}
 
   @UseGuards(JwtAuthGuard)
-  @Post('send')
+  @Post()
   async sendFriendRequest(
     @Request() req: any,
     @Body() dto: CreateFriendshipDto,
@@ -44,7 +42,7 @@ export class FriendshipController {
   }
 
   @UseGuards(JwtAuthGuard)
-  @Get('received')
+  @Get('requests/received')
   async getReceivedRequests(@Request() req: any) {
     try {
       this.logger.log(
@@ -61,8 +59,8 @@ export class FriendshipController {
   }
 
   @UseGuards(JwtAuthGuard)
-  @Get('sending')
-  async getSendingRequests(@Request() req: any) {
+  @Get('requests/sent')
+  async getSentRequests(@Request() req: any) {
     try {
       this.logger.log(
         `Fetching sending friend requests for account ${req.account.id}`,
@@ -78,7 +76,7 @@ export class FriendshipController {
   }
 
   @UseGuards(JwtAuthGuard)
-  @Put(':id/action')
+  @Put('requests/:id')
   async handleFriendRequest(
     @Request() req: any,
     @Param('id') id: string,
@@ -97,9 +95,11 @@ export class FriendshipController {
         action,
       );
       return {
+        status: 'success',
         message: `Yêu cầu kết bạn đã được ${action === 'ACCEPT' ? 'chấp nhận' : 'từ chối'}`,
       };
     } catch (error) {
+      this.logger.error(`Error handling friend request: ${error.message}`);
       throw new HttpException(
         error.message,
         error.status || HttpStatus.INTERNAL_SERVER_ERROR,
@@ -108,13 +108,34 @@ export class FriendshipController {
   }
 
   @UseGuards(JwtAuthGuard)
-  @Get('friends')
+  @Get()
   async getFriends(@Request() req: any) {
     try {
       this.logger.log(`Fetching friends for account ${req.account.id}`);
       return await this.friendshipService.getFriends(req.account.id);
     } catch (error) {
       this.logger.error(`Error fetching friends: ${error.message}`);
+      throw new HttpException(
+        error.message,
+        error.status || HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Put('delete/:id')
+  async deleteFriendship(@Request() req: any, @Param('id') id: string) {
+    try {
+      this.logger.log(
+        `Deleting friendship ${id} for account ${req.account.id}`,
+      );
+      await this.friendshipService.deleteFriendship(id, req.account.id);
+      return {
+        status: 'success',
+        message: 'Mối quan hệ bạn bè đã được xóa',
+      };
+    } catch (error) {
+      this.logger.error(`Error deleting friendship: ${error.message}`);
       throw new HttpException(
         error.message,
         error.status || HttpStatus.INTERNAL_SERVER_ERROR,

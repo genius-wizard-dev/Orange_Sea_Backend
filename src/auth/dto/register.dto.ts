@@ -1,6 +1,13 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Role } from '@prisma/client';
-import { IsEmail, IsEnum, IsOptional, IsString, Length } from 'class-validator';
+import {
+  IsEmail,
+  IsEnum,
+  IsOptional,
+  IsString,
+  Length,
+  Matches,
+} from 'class-validator';
 
 export class RegisterDTO {
   @ApiProperty({ description: 'Tên đăng nhập', minLength: 5, maxLength: 50 })
@@ -20,6 +27,12 @@ export class RegisterDTO {
   @ApiProperty({ description: 'Mật khẩu', minLength: 5, maxLength: 50 })
   @IsString()
   @Length(5, 50)
+  @Matches(
+    /^(?=.*[0-9])(?=.*[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?])[a-zA-Z0-9!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]{5,50}$/,
+    {
+      message: 'Mật khẩu phải chứa ít nhất 1 chữ số và 1 ký tự đặc biệt',
+    },
+  )
   password: string;
 
   @ApiProperty({
