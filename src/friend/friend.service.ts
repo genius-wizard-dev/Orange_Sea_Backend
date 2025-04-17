@@ -1,6 +1,7 @@
 /* eslint-disable prettier/prettier */
 import { PrismaClient } from '@prisma/client';
 import { CreateFriendshipDto } from './dto/create.friendship.dto';
+import { use } from 'passport';
 
 export class FriendshipService {
   private prisma: PrismaClient;
@@ -298,4 +299,134 @@ export class FriendshipService {
       await this.prisma.$disconnect();
     }
   }
+
+  async searchUser(
+    accountId: string,
+    keyword: string,
+  ): Promise<any[]> {
+    try {
+      // Ensure the requester has a profile
+      const profile = await this.prisma.profile.findUnique({
+        where: { accountId },
+      });
+      if (!profile) {
+        throw new Error('Người dùng không tồn tại');
+      }
+
+      const users = await this.prisma.profile.findMany({
+        where: {
+          AND: [
+            { accountId: { not: accountId } },
+            {
+              OR: [
+                { account: { username: { contains: keyword, mode: 'insensitive' } } },
+                { phone: { contains: keyword } },
+              ],
+            },
+          ],
+        },
+        select: {
+          id: true,
+          name: true,
+          avatar: true,
+          bio: true,
+          phone: true,
+          birthday: true,
+          account: { select: { username: true } },
+        },
+      });
+
+      return users.map(u => ({
+        id: u.id,
+        username: u.account.username,
+        name: u.name,
+        avatar: u.avatar,
+      }));
+    } finally {
+      await this.prisma.$disconnect();
+    }
+  }
+
+  // async searchUser(accountId: string, keyword: string): Promise<any[]> {
+  //   try {
+  //     const currentProfile = await this.prisma.profile.findUnique({
+  //       where: { accountId },
+  //     });
+  
+  //     if (!currentProfile) {
+  //       throw new Error('Người dùng không tồn tại');
+  //     }
+  
+  //     // Lấy tất cả các quan hệ bạn bè có liên quan đến current user
+  //     const friendships = await this.prisma.friendship.findMany({
+  //       where: {
+  //         OR: [
+  //           { senderId: currentProfile.id },
+  //           { receiverId: currentProfile.id },
+  //         ],
+  //       },
+  //       select: {
+  //         senderId: true,
+  //         receiverId: true,
+  //         status: true,
+  //       },
+  //     });
+  
+  //     // Tạo map để tra nhanh trạng thái quan hệ
+  //     const relationMap: Record<string, { status: string; senderId: string }> = {};
+  //     friendships.forEach(f => {
+  //       const otherId = f.senderId === currentProfile.id ? f.receiverId : f.senderId;
+  //       relationMap[otherId] = { status: f.status, senderId: f.senderId };
+  //     });
+  
+  //     // Tìm user theo keyword, loại trừ bản thân
+  //     const users = await this.prisma.profile.findMany({
+  //       where: {
+  //         AND: [
+  //           { accountId: { not: accountId } },
+  //           {
+  //             OR: [
+  //               { account: { username: { contains: keyword, mode: 'insensitive' } } },
+  //               { phone: { contains: keyword } },
+  //             ],
+  //           },
+  //         ],
+  //       },
+  //       select: {
+  //         id: true,
+  //         name: true,
+  //         avatar: true,
+  //       },
+  //     });
+  
+  //     // Gắn trạng thái quan hệ vào từng user
+  //     return users.map(u => {
+  //       const rel = relationMap[u.id];
+  //       let relation: string;
+  
+  //       if (!rel) {
+  //         relation = 'NONE';
+  //       } else if (rel.status === 'ACCEPTED') {
+  //         relation = 'FRIEND';
+  //       } else if (rel.status === 'REJECTED') {
+  //         relation = 'REJECTED';
+  //       } else if (rel.status === 'PENDING') {
+  //         relation = rel.senderId === currentProfile.id ? 'PENDING_SENT' : 'PENDING_RECEIVED';
+  //       } else {
+  //         relation = 'UNKNOWN';
+  //       }
+  
+  //       return {
+  //         id: u.id,
+  //         name: u.name,
+  //         avatar: u.avatar,
+  //         relation,
+  //       };
+  //     });
+  //   } finally {
+  //     await this.prisma.$disconnect();
+  //   }
+  // }
+  
+
 }

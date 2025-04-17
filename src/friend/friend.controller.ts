@@ -142,4 +142,27 @@ export class FriendshipController {
       );
     }
   }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('search/:keyword')
+  async searchUser(
+    @Request() req: any,
+    @Param('keyword') keyword: string,
+  ) {
+    try {
+      this.logger.log(
+        `Searching for user ${keyword} for account ${req.account.id}`,
+      );
+      return await this.friendshipService.searchUser(
+        req.account.id,
+        keyword,
+      );
+    } catch (error) {
+      this.logger.error(`Error searching user: ${error.message}`);
+      throw new HttpException(
+        error.message,
+        error.status || HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
 }
