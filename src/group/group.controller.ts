@@ -48,7 +48,7 @@ export class GroupController {
   @UseGuards(JwtAuthGuard)
   async getGroups(@Request() req) {
     const accountId = req.account.id;
-    return this.groupService.getGroupsByUserId(accountId);
+    return this.groupService.getGroupByAccountId(accountId);
   }
 
   @Put(':groupId/participant')

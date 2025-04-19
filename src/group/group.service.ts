@@ -220,8 +220,7 @@ export class GroupService {
       throw error;
     }
   }
-
-  async getGroupsByUserId(accountId: string) {
+  async getGroupByAccountId(accountId: string) {
     try {
       const profile = await this.getProfileFromAccountId(accountId);
       const userId = profile.id;
@@ -240,6 +239,56 @@ export class GroupService {
               user: true,
             },
           },
+          messages: {
+            orderBy: {
+              createdAt: 'desc',
+            },
+            take: 1,
+          },
+        },
+        orderBy: {
+          updatedAt: 'desc',
+        },
+      });
+    } catch (error) {
+      this.logger.error(
+        `Error getting groups by account ID: ${error.message}`,
+        error.stack,
+      );
+      throw error;
+    }
+  }
+
+  async getGroupsByProfileId(profileId: string) {
+    try {
+      const profile = await this.prismaService.profile.findUnique({
+        where: { id: profileId },
+      });
+      if (!profile) {
+        throw new Error('Profile not found');
+      }
+      const userId = profile.id;
+
+      return this.prismaService.group.findMany({
+        where: {
+          participants: {
+            some: {
+              userId,
+            },
+          },
+        },
+        include: {
+          participants: {
+            include: {
+              user: true,
+            },
+          },
+          messages: {
+            orderBy: {
+              createdAt: 'desc',
+            },
+            take: 1,
+          },
         },
         orderBy: {
           updatedAt: 'desc',
@@ -247,6 +296,62 @@ export class GroupService {
       });
     } catch (error) {
       this.logger.error(`Error getting groups: ${error.message}`, error.stack);
+      throw error;
+    }
+  }
+  async isGroupMember(profileId: string, groupId: string): Promise<boolean> {
+    try {
+      const group = await this.prismaService.group.findUnique({
+        where: { id: groupId },
+        include: {
+          participants: true,
+        },
+      });
+      ``;
+
+      if (!group) {
+        throw new Error('Group not found');
+      }
+
+      const profile = await this.prismaService.profile.findUnique({
+        where: { id: profileId },
+      });
+      if (!profile) {
+        throw new Error('Profile not found');
+      }
+      return group.participants.some((p) => p.userId === profile.id);
+    } catch (error) {
+      this.logger.error(
+        `Error checking group membership: ${error.message}`,
+        error.stack,
+      );
+      throw error;
+    }
+  }
+
+  async getGroupById(groupId: string) {
+    try {
+      const group = await this.prismaService.group.findUnique({
+        where: { id: groupId },
+        include: {
+          participants: {
+            select: {
+              userId: true,
+            },
+          },
+        },
+      });
+
+      if (!group) {
+        throw new NotFoundException('Group not found');
+      }
+      const participantIds = group.participants.map((p) => p.userId);
+      return participantIds;
+    } catch (error) {
+      this.logger.error(
+        `Error getting group by ID: ${error.message}`,
+        error.stack,
+      );
       throw error;
     }
   }

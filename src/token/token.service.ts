@@ -234,15 +234,26 @@ export class TokenService {
       const userKey = `user:${payload.sub}`;
       const deviceData: DeviceData | null = await this.redisService.hget<DeviceData>(userKey, deviceId);
 
-      if (deviceData && deviceData.refreshToken === token && deviceData.ip === ip) {
-        await this.redisService.hdel(userKey, deviceId);
-        this.logger.debug(`Revoked refresh token for device ${deviceId} of user ${payload.sub}`);
-      } else {
-        throw new Error('Device mismatch or unknown');
+      if (!deviceData) {
+        this.logger.warn(`Device ${deviceId} not found for user ${payload.sub}`);
+        return; // Just return without error as the device is already not in Redis
       }
+
+      if (deviceData.refreshToken !== token) {
+        this.logger.warn(`Token mismatch for device ${deviceId}: stored token doesn't match provided token`);
+        return; // No need to revoke if tokens don't match
+      }
+
+      if (deviceData.ip !== ip) {
+        this.logger.warn(`IP mismatch for device ${deviceId}: expected ${deviceData.ip}, received ${ip}`);
+        // Continue with revocation despite IP mismatch for security
+      }
+
+      await this.redisService.hdel(userKey, deviceId);
+      this.logger.debug(`Revoked refresh token for device ${deviceId} of user ${payload.sub}`);
     } catch (error) {
       this.logger.error(`Failed to revoke refresh token: ${error.message}`);
-      throw error;
+      // Don't throw error to avoid blocking logout processes
     }
   }
 

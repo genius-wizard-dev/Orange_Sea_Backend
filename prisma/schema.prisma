@@ -97,20 +97,33 @@ model Participant {
 }
 
 model Message {
-  id        String        @id @default(auto()) @map("_id") @db.ObjectId
-  sender    Profile       @relation(fields: [senderId], references: [id], onDelete: Cascade)
-  senderId  String        @db.ObjectId
-  group     Group         @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  groupId   String        @db.ObjectId
-  content   String?
-  fileUrl   String?
-  fileType  String?
-  createdAt DateTime      @default(now())
-  updatedAt DateTime      @updatedAt
-  readBy    ReadMessage[]
+  id              String        @id @default(auto()) @map("_id") @db.ObjectId
+  sender          Profile       @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  senderId        String        @db.ObjectId
+  group           Group         @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  groupId         String        @db.ObjectId
+  content         String?
+  imageUrl        String?
+  videoUrl        String?
+  stickerUrl      String?
+  type            MessageType   @default(TEXT)
+  isRecalled      Boolean       @default(false)
+  recalledAt      DateTime?
+  editedAt        DateTime?
+  originalContent String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  readBy          ReadMessage[]
 
   @@index([groupId, createdAt(sort: Desc)])
   @@index([senderId])
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  VIDEO
+  STICKER
 }
 
 model ReadMessage {
