@@ -46,7 +46,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  async get<T=any>(key: string): Promise<T | null> {
+  async get<T = any>(key: string): Promise<T | null> {
     try {
       const value = await this.redisClient.get(key);
       if (!value) {
@@ -82,7 +82,8 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
 
   async hset(key: string, field: string, value: any): Promise<void> {
     try {
-      const serializedValue = typeof value === 'string' ? value : JSON.stringify(value);
+      const serializedValue =
+        typeof value === 'string' ? value : JSON.stringify(value);
       await this.redisClient.hset(key, field, serializedValue);
     } catch (error) {
       console.error(`Lỗi khi lưu hash ${field} vào ${key}: ${error.message}`);
@@ -92,8 +93,6 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
 
   async hget<T = any>(key: string, field: string): Promise<T | null> {
     try {
-
-
       const value = await this.redisClient.hget(key, field);
       if (value === null) {
         this.logger.debug(`Field ${field} not found in hash key: ${key}`);
@@ -101,7 +100,9 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
       }
       return JSON.parse(value) as T;
     } catch (error) {
-      this.logger.error(`Error getting hash field ${field} from key ${key}: ${error.message}`);
+      this.logger.error(
+        `Error getting hash field ${field} from key ${key}: ${error.message}`,
+      );
       throw error;
     }
   }
@@ -109,9 +110,13 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   async hdel(key: string, ...fields: string[]): Promise<void> {
     try {
       await this.redisClient.hdel(key, ...fields);
-      this.logger.debug(`Successfully deleted hash fields: ${fields} in key: ${key}`);
+      this.logger.debug(
+        `Successfully deleted hash fields: ${fields} in key: ${key}`,
+      );
     } catch (error) {
-      this.logger.error(`Error deleting fields from hash ${key}: ${error.message}`);
+      this.logger.error(
+        `Error deleting fields from hash ${key}: ${error.message}`,
+      );
       throw error;
     }
   }
@@ -121,7 +126,9 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
       const exists = await this.redisClient.exists(key);
       return exists === 1;
     } catch (error) {
-      this.logger.error(`Error checking existence for key ${key}: ${error.message}`);
+      this.logger.error(
+        `Error checking existence for key ${key}: ${error.message}`,
+      );
       throw error;
     }
   }
@@ -151,12 +158,93 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     try {
       const serialized = JSON.stringify(value);
       await this.redisClient.setex(key, seconds, serialized);
-      this.logger.debug(`Successfully set key with expiry: ${key}, TTL: ${seconds}s`);
+      this.logger.debug(
+        `Successfully set key with expiry: ${key}, TTL: ${seconds}s`,
+      );
     } catch (error) {
-      this.logger.error(`Error setting key ${key} with expiry: ${error.message}`);
+      this.logger.error(
+        `Error setting key ${key} with expiry: ${error.message}`,
+      );
       throw error;
     }
   }
 
+  async hsetJson(key: string, field: string, value: any): Promise<void> {
+    try {
+      const serializedValue = JSON.stringify(value);
+      await this.hset(key, field, serializedValue);
+      this.logger.debug(
+        `Successfully set JSON hash field: ${field} in key: ${key}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Error setting JSON hash field ${field} in key ${key}: ${error.message}`,
+      );
+      throw error;
+    }
+  }
 
+  async hgetJson<T = any>(key: string, field: string): Promise<T | null> {
+    try {
+      const value = await this.hget(key, field);
+      if (!value) {
+        return null;
+      }
+      return JSON.parse(value) as T;
+    } catch (error) {
+      this.logger.error(
+        `Error getting JSON hash field ${field} from key ${key}: ${error.message}`,
+      );
+      throw error;
+    }
+  }
+
+  async sadd(key: string, ...members: string[]): Promise<number> {
+    try {
+      const result = await this.redisClient.sadd(key, ...members);
+      this.logger.debug(`Added ${result} members to set ${key}`);
+      return result;
+    } catch (error) {
+      this.logger.error(`Error adding members to set ${key}: ${error.message}`);
+      throw error;
+    }
+  }
+
+  async srem(key: string, ...members: string[]): Promise<number> {
+    try {
+      const result = await this.redisClient.srem(key, ...members);
+      this.logger.debug(`Removed ${result} members from set ${key}`);
+      return result;
+    } catch (error) {
+      this.logger.error(
+        `Error removing members from set ${key}: ${error.message}`,
+      );
+      throw error;
+    }
+  }
+
+  async smembers(key: string): Promise<string[]> {
+    try {
+      const members = await this.redisClient.smembers(key);
+      this.logger.debug(`Retrieved ${members.length} members from set ${key}`);
+      return members;
+    } catch (error) {
+      this.logger.error(
+        `Error getting members from set ${key}: ${error.message}`,
+      );
+      throw error;
+    }
+  }
+
+  async sismember(key: string, member: string): Promise<boolean> {
+    try {
+      const result = await this.redisClient.sismember(key, member);
+      return result === 1;
+    } catch (error) {
+      this.logger.error(
+        `Error checking member in set ${key}: ${error.message}`,
+      );
+      throw error;
+    }
+  }
 }
