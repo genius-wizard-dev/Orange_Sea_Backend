@@ -10,6 +10,7 @@ import {
 } from '@nestjs/websockets';
 import { MessageType } from '@prisma/client';
 import { Server, Socket } from 'socket.io';
+import { RedisService } from 'src/config/redis/redis.service';
 import { GroupService } from 'src/group/group.service';
 import { ChatService } from './chat.service';
 import { SendMessageDto } from './dto/send-message.dto';
@@ -24,18 +25,18 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server: Server;
   private readonly logger = new Logger(ChatGateway.name);
+
   constructor(
     private readonly groupService: GroupService,
     private readonly chatService: ChatService,
+    private readonly redisService: RedisService,
   ) {}
 
-  private appConnections = new Map<string, Set<string>>();
-
-  private activeGroupViewers = new Map<string, Set<string>>();
-
-  private socketToProfile = new Map<string, string>();
-
-  private socketToActiveGroup = new Map<string, string>();
+  // Redis key prefixes
+  private readonly SOCKET_TO_PROFILE = 'socket:profile:';
+  private readonly PROFILE_CONNECTIONS = 'profile:connections:';
+  private readonly ACTIVE_GROUP_VIEWERS = 'group:viewers:';
+  private readonly SOCKET_TO_ACTIVE_GROUP = 'socket:group:';
 
   @SubscribeMessage('register')
   async handleRegister(
@@ -48,27 +49,21 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         throw new Error('profileId is required');
       }
 
-      this.socketToProfile.set(client.id, profileId);
+      // Store socket to profile mapping in Redis
+      await this.redisService.set(
+        `${this.SOCKET_TO_PROFILE}${client.id}`,
+        profileId,
+      );
 
-      if (!this.appConnections.has(profileId)) {
-        this.appConnections.set(profileId, new Set());
-      }
-      const connections = this.appConnections.get(profileId);
-      if (connections) {
-        connections.add(client.id);
-      }
+      // Add socket id to profile's connections SET (guarantees uniqueness)
+      const connectionsKey = `${this.PROFILE_CONNECTIONS}${profileId}`;
+      await this.redisService.sadd(connectionsKey, client.id);
 
       this.logger.debug(
         `User ${profileId} registered with socket ${client.id}`,
       );
-      this.logger.debug(
-        `Current app connections: ${this.logMapToString(this.appConnections)}`,
-      );
-      this.logger.debug(
-        `Current socket to profile mapping: ${this.logMapToString(this.socketToProfile)}`,
-      );
 
-      this.broadcastUserStatus(profileId, true);
+      await this.broadcastUserStatus(profileId, true);
 
       const unreadCounts =
         await this.chatService.getUnreadMessageCountsByGroups(profileId);
@@ -92,10 +87,17 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
-  handleDisconnect(client: Socket) {
+  async handleDisconnect(client: Socket) {
     try {
-      const profileId = this.socketToProfile.get(client.id);
-      const activeGroupId = this.socketToActiveGroup.get(client.id);
+      // Get profile ID associated with this socket
+      const profileId = await this.redisService.get<string>(
+        `${this.SOCKET_TO_PROFILE}${client.id}`,
+      );
+
+      // Get active group associated with this socket
+      const activeGroupId = await this.redisService.get<string>(
+        `${this.SOCKET_TO_ACTIVE_GROUP}${client.id}`,
+      );
 
       this.logger.debug(
         `Client disconnecting: ${client.id}, profileId: ${profileId}, activeGroupId: ${activeGroupId}`,
@@ -103,97 +105,91 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       // Remove from active group if viewing one
       if (activeGroupId && profileId) {
-        const viewers = this.activeGroupViewers.get(activeGroupId);
-        if (viewers) {
-          viewers.delete(profileId);
-          if (viewers.size === 0) {
-            this.activeGroupViewers.delete(activeGroupId);
-          }
-          // Notify group members about user leaving
-          this.server.to(activeGroupId).emit('userStatusUpdate', {
-            profileId,
-            isActive: false,
-            groupId: activeGroupId,
-          });
+        const viewersKey = `${this.ACTIVE_GROUP_VIEWERS}${activeGroupId}`;
+        // Remove user from active viewers set
+        await this.redisService.srem(viewersKey, profileId);
 
-          this.logger.debug(
-            `User ${profileId} removed from active viewers of group ${activeGroupId}, remaining viewers: ${
-              Array.from(viewers || []).join(', ') || 'none'
-            }`,
-          );
+        // Check if the set is now empty
+        const remainingViewers = await this.redisService.smembers(viewersKey);
+        if (remainingViewers.length === 0) {
+          await this.redisService.del(viewersKey);
         }
 
-        this.socketToActiveGroup.delete(client.id);
+        // Notify group members about user leaving
+        this.server.to(activeGroupId).emit('userStatusUpdate', {
+          profileId,
+          isActive: false,
+          groupId: activeGroupId,
+        });
+
+        // Delete the socket to group mapping
+        await this.redisService.del(
+          `${this.SOCKET_TO_ACTIVE_GROUP}${client.id}`,
+        );
       }
 
-      // Remove from app connections
+      // Remove socket from user's connections
       if (profileId) {
-        const sockets = this.appConnections.get(profileId);
-        if (sockets) {
-          sockets.delete(client.id);
+        const connectionsKey = `${this.PROFILE_CONNECTIONS}${profileId}`;
+        // Remove socket from the user's connections set
+        await this.redisService.srem(connectionsKey, client.id);
+
+        // Check if the user has any remaining connections
+        const remainingConnections =
+          await this.redisService.smembers(connectionsKey);
+
+        if (remainingConnections.length === 0) {
+          await this.redisService.del(connectionsKey);
+          // User is completely offline, broadcast to all relevant groups
+          await this.broadcastUserStatus(profileId, false);
+          this.logger.debug(`User ${profileId} is now completely offline`);
+        } else {
           this.logger.debug(
-            `Socket ${client.id} removed from connections for user ${profileId}, remaining sockets: ${
-              Array.from(sockets).join(', ') || 'none'
-            }`,
+            `Socket ${client.id} removed from connections for user ${profileId}, remaining sockets: ${remainingConnections.length}`,
           );
-
-          if (sockets.size === 0) {
-            this.appConnections.delete(profileId);
-            // User is completely offline, broadcast to all relevant groups
-            this.broadcastUserStatus(profileId, false);
-            this.logger.debug(`User ${profileId} is now completely offline`);
-          }
         }
-
-        this.socketToProfile.delete(client.id);
       }
 
-      this.logger.debug(
-        `Client ${client.id} disconnected, remaining clients: ${this.server.engine.clientsCount}`,
-      );
-      this.logger.debug(
-        `Current active viewers by group: ${this.logMapToString(this.activeGroupViewers)}`,
-      );
-      this.logger.debug(
-        `Current app connections: ${this.logMapToString(this.appConnections)}`,
-      );
+      // Delete the socket to profile mapping
+      await this.redisService.del(`${this.SOCKET_TO_PROFILE}${client.id}`);
+
+      this.logger.debug(`Client ${client.id} disconnected`);
     } catch (error) {
       this.logger.error(`Error handling disconnect: ${error.message}`);
     }
   }
 
-  private broadcastUserStatus(profileId: string, isOnline: boolean) {
+  private async broadcastUserStatus(profileId: string, isOnline: boolean) {
     this.logger.debug(
       `Broadcasting ${isOnline ? 'online' : 'offline'} status for user ${profileId}`,
     );
 
-    this.groupService
-      .getGroupsByProfileId(profileId)
-      .then((groups) => {
+    try {
+      const groups = await this.groupService.getGroupsByProfileId(profileId);
+      this.logger.debug(
+        `User ${profileId} is a member of ${groups.length} groups`,
+      );
+
+      for (const group of groups) {
+        const viewersKey = `${this.ACTIVE_GROUP_VIEWERS}${group.id}`;
+        const viewers = (await this.redisService.smembers(viewersKey)) || [];
+        const isActive = viewers.includes(profileId);
+
         this.logger.debug(
-          `User ${profileId} is a member of ${groups.length} groups`,
+          `Broadcasting status to group ${group.id}: user ${profileId} is ${isOnline ? 'online' : 'offline'} and ${
+            isActive ? 'active' : 'inactive'
+          } in this group`,
         );
 
-        groups.forEach((group) => {
-          const isActive =
-            this.activeGroupViewers.get(group.id)?.has(profileId) || false;
-
-          this.logger.debug(
-            `Broadcasting status to group ${group.id}: user ${profileId} is ${isOnline ? 'online' : 'offline'} and ${
-              isActive ? 'active' : 'inactive'
-            } in this group`,
-          );
-
-          this.server.to(group.id).emit('userStatusUpdate', {
-            profileId,
-            isOnline,
-            isActive,
-          });
+        this.server.to(group.id).emit('userStatusUpdate', {
+          profileId,
+          isOnline,
+          isActive,
         });
-      })
-      .catch((err) => {
-        this.logger.error(`Error broadcasting user status: ${err.message}`);
-      });
+      }
+    } catch (err) {
+      this.logger.error(`Error broadcasting user status: ${err.message}`);
+    }
   }
 
   @SubscribeMessage('open')
@@ -223,34 +219,36 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       }
 
       // Check if socket was previously in another room
-      const previousGroup = this.socketToActiveGroup.get(client.id);
+      const previousGroup = await this.redisService.get<string>(
+        `${this.SOCKET_TO_ACTIVE_GROUP}${client.id}`,
+      );
       if (previousGroup && previousGroup !== data.groupId) {
         this.logger.debug(
           `User ${data.profileId} was previously in group ${previousGroup}, leaving that group first`,
         );
-        this.handleLeaveRoom(
+        await this.handleLeaveRoom(
           { profileId: data.profileId, groupId: previousGroup },
           client,
         );
       }
 
-      // Update active group for this socket
-      this.socketToActiveGroup.set(client.id, data.groupId);
+      // Update active group for this socket in Redis
+      await this.redisService.set(
+        `${this.SOCKET_TO_ACTIVE_GROUP}${client.id}`,
+        data.groupId,
+      );
       this.logger.debug(
         `Updated socketToActiveGroup mapping: ${client.id} -> ${data.groupId}`,
       );
 
-      // Add to active viewers for this group
-      if (!this.activeGroupViewers.has(data.groupId)) {
-        this.activeGroupViewers.set(data.groupId, new Set());
-      }
-      const viewers = this.activeGroupViewers.get(data.groupId);
-      if (viewers) {
-        viewers.add(data.profileId);
-        this.logger.debug(
-          `Active viewers for group ${data.groupId}: ${Array.from(viewers).join(', ')}`,
-        );
-      }
+      // Add to active viewers for this group in Redis using SET
+      const viewersKey = `${this.ACTIVE_GROUP_VIEWERS}${data.groupId}`;
+      await this.redisService.sadd(viewersKey, data.profileId);
+
+      const viewers = await this.redisService.smembers(viewersKey);
+      this.logger.debug(
+        `Active viewers for group ${data.groupId}: ${viewers.join(', ')}`,
+      );
 
       // Join socket room to receive messages
       client.join(data.groupId);
@@ -298,10 +296,20 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         this.server.to(client.id).emit('unreadCountUpdated', unreadCounts);
       }
 
-      // Return list of active users in this group to the client
-      const activeUsers = Array.from(
-        this.activeGroupViewers.get(data.groupId) || [],
+      // Get last 10 messages for this group
+      const lastMessages = await this.chatService.getLastMessages(
+        data.groupId,
+        10,
       );
+      this.logger.debug(
+        `Retrieved ${lastMessages.length} messages for group ${data.groupId}`,
+      );
+
+      // Return active users and last messages
+      const activeUsers = await this.redisService.smembers(
+        `${this.ACTIVE_GROUP_VIEWERS}${data.groupId}`,
+      );
+
       this.logger.debug(
         `Returning active users for group ${data.groupId}: ${activeUsers.join(', ')}`,
       );
@@ -309,6 +317,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return {
         status: 'success',
         activeUsers,
+        lastMessages, // Include last messages in the response
       };
     } catch (error) {
       this.logger.error(`Error opening chat: ${error.message}`);
@@ -320,7 +329,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   @SubscribeMessage('leave')
-  handleLeaveRoom(
+  async handleLeaveRoom(
     @MessageBody() data: { profileId: string; groupId: string },
     @ConnectedSocket() client: Socket,
   ) {
@@ -336,27 +345,32 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       // Leave socket room
       client.leave(data.groupId);
 
-      // Remove from active viewers
-      const viewers = this.activeGroupViewers.get(data.groupId);
-      if (viewers) {
-        viewers.delete(data.profileId);
-        this.logger.debug(
-          `User ${data.profileId} removed from active viewers of group ${data.groupId}, remaining viewers: ${
-            Array.from(viewers).join(', ') || 'none'
-          }`,
-        );
+      // Remove from active viewers in Redis using srem
+      const viewersKey = `${this.ACTIVE_GROUP_VIEWERS}${data.groupId}`;
+      await this.redisService.srem(viewersKey, data.profileId);
 
-        if (viewers.size === 0) {
-          this.activeGroupViewers.delete(data.groupId);
-          this.logger.debug(
-            `No more active viewers for group ${data.groupId}, removing group from tracking`,
-          );
-        }
+      // Check if anyone is still viewing this group
+      const remainingViewers = await this.redisService.smembers(viewersKey);
+
+      if (remainingViewers.length > 0) {
+        this.logger.debug(
+          `User ${data.profileId} removed from active viewers of group ${data.groupId}, remaining viewers: ${remainingViewers.join(', ') || 'none'}`,
+        );
+      } else {
+        await this.redisService.del(viewersKey);
+        this.logger.debug(
+          `No more active viewers for group ${data.groupId}, removing group from tracking`,
+        );
       }
 
-      // Clear active group for this socket
-      if (this.socketToActiveGroup.get(client.id) === data.groupId) {
-        this.socketToActiveGroup.delete(client.id);
+      // Clear active group for this socket in Redis
+      const currentActiveGroup = await this.redisService.get<string>(
+        `${this.SOCKET_TO_ACTIVE_GROUP}${client.id}`,
+      );
+      if (currentActiveGroup === data.groupId) {
+        await this.redisService.del(
+          `${this.SOCKET_TO_ACTIVE_GROUP}${client.id}`,
+        );
         this.logger.debug(
           `Removed socket ${client.id} from activeGroup mapping`,
         );
@@ -369,7 +383,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       // Notify group members about user leaving
       this.server.to(data.groupId).emit('userStatusUpdate', {
         profileId: data.profileId,
-        isOnline: this.appConnections.has(data.profileId),
+        isOnline: await this.isProfileOnline(data.profileId),
         isActive: false,
         groupId: data.groupId,
       });
@@ -384,8 +398,23 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
+  // Helper method to check if a profile is online
+  private async isProfileOnline(profileId: string): Promise<boolean> {
+    const connections = await this.redisService.smembers(
+      `${this.PROFILE_CONNECTIONS}${profileId}`,
+    );
+    return connections.length > 0;
+  }
+
+  // Get active viewers for a group
+  private async getActiveViewers(groupId: string): Promise<string[]> {
+    return await this.redisService.smembers(
+      `${this.ACTIVE_GROUP_VIEWERS}${groupId}`,
+    );
+  }
+
   @SubscribeMessage('getActiveUsers')
-  handleGetActiveUsers(
+  async handleGetActiveUsers(
     @MessageBody() data: { groupId: string },
     @ConnectedSocket() client: Socket,
   ) {
@@ -395,9 +424,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         throw new Error('groupId is required');
       }
 
-      const activeUsers = Array.from(
-        this.activeGroupViewers.get(groupId) || [],
-      );
+      const activeUsers = await this.getActiveViewers(groupId);
       this.logger.debug(
         `Active users for group ${groupId}: ${activeUsers.join(', ')}`,
       );
@@ -557,9 +584,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       }
 
       // Get active readers (users currently viewing this group)
-      const activeReaders = Array.from(
-        this.activeGroupViewers.get(groupId) || [],
-      );
+      const activeReaders = await this.getActiveViewers(groupId);
       this.logger.debug(
         `Active readers for message in group ${groupId}: ${activeReaders.join(', ') || 'none'}`,
       );
@@ -594,9 +619,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       this.logger.debug(`Emitted 'newMessage' event to group ${groupId}`);
 
       // For participants not actively viewing the group but online, send unread notification
-      participants.forEach((participantId) => {
+      participants.forEach(async (participantId) => {
         // Skip if user is actively viewing the group
-        if (this.activeGroupViewers.get(groupId)?.has(participantId)) {
+        if (activeReaders.includes(participantId)) {
           this.logger.debug(
             `Skipping notification for user ${participantId} who is actively viewing the group`,
           );
@@ -604,10 +629,13 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         }
 
         // If user is online but not viewing this group, send notification
-        const userSockets = this.appConnections.get(participantId);
-        if (userSockets && userSockets.size > 0) {
+        const userSockets = await this.redisService.smembers(
+          `${this.PROFILE_CONNECTIONS}${participantId}`,
+        );
+
+        if (userSockets.length > 0) {
           this.logger.debug(
-            `Sending notification to user ${participantId} who is online but not viewing the group, via sockets: ${Array.from(userSockets).join(', ')}`,
+            `Sending notification to user ${participantId} who is online but not viewing the group, via sockets: ${userSockets.join(', ')}`,
           );
 
           userSockets.forEach((socketId) => {
@@ -639,27 +667,12 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         }
       });
 
-      this.logger.debug('Message sent successfully to group:', groupId);
+      this.logger.debug(`Message sent successfully to group: ${groupId}`);
 
       return { status: 'success', data: messageResult };
     } catch (error) {
       console.error('Error sending message via socket:', error);
       return { status: 'error', message: error.message };
     }
-  }
-
-  // Helper function to log Maps in a readable format
-  private logMapToString(map: Map<string, any>): string {
-    const entries = Array.from(map.entries()).map(([key, value]) => {
-      if (value instanceof Set) {
-        return `${key}: [${Array.from(value).join(', ')}]`;
-      } else if (value instanceof Map) {
-        return `${key}: ${this.logMapToString(value)}`;
-      } else {
-        return `${key}: ${value}`;
-      }
-    });
-
-    return `{${entries.join(', ')}}`;
   }
 }

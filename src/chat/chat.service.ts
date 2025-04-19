@@ -222,6 +222,47 @@ export class ChatService {
     return results;
   }
 
+  async getLastMessages(groupId: string, limit: number = 10) {
+    this.logger.debug(`Fetching last ${limit} messages for group ${groupId}`);
+
+    try {
+      const messages = await this.prisma.message.findMany({
+        where: {
+          groupId,
+        },
+        orderBy: {
+          createdAt: 'desc',
+        },
+        take: limit,
+        include: {
+          readBy: true,
+          sender: {
+            select: {
+              id: true,
+              name: true,
+              avatar: true,
+            },
+          },
+        },
+      });
+
+      this.logger.debug(
+        `Retrieved ${messages.length} messages for group ${groupId}`,
+      );
+
+      // Return messages in chronological order (oldest first)
+      return messages.reverse().map((message) => ({
+        ...message,
+        readBy: message.readBy.map((read) => read.userId),
+      }));
+    } catch (error) {
+      this.logger.error(
+        `Error fetching messages for group ${groupId}: ${error.message}`,
+      );
+      throw error;
+    }
+  }
+
   async uploadSticker(file: Express.Multer.File): Promise<string> {
     try {
       const filename = `sticker_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
