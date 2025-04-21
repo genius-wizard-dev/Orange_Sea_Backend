@@ -8,12 +8,10 @@ import {
   WebSocketGateway,
   WebSocketServer,
 } from '@nestjs/websockets';
-import { MessageType } from '@prisma/client';
 import { Server, Socket } from 'socket.io';
 import { RedisService } from 'src/config/redis/redis.service';
 import { GroupService } from 'src/group/group.service';
 import { ChatService } from './chat.service';
-import { SendMessageDto } from './dto/send-message.dto';
 
 @WebSocketGateway({
   cors: {
@@ -296,9 +294,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         this.server.to(client.id).emit('unreadCountUpdated', unreadCounts);
       }
 
-      // Get last 10 messages for this group
+      // Get last 10 messages for this group (lọc theo tin nhắn chưa bị xóa bởi người dùng)
       const lastMessages = await this.chatService.getLastMessages(
         data.groupId,
+        data.profileId,
         10,
       );
       this.logger.debug(
@@ -522,65 +521,32 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   @SubscribeMessage('send')
   async handleSendMessage(
-    @MessageBody(new ValidationPipe()) data: SendMessageDto,
+    @MessageBody(new ValidationPipe()) data: { messageId: string; groupId: string; senderId: string },
     @ConnectedSocket() client: Socket,
   ) {
     try {
-      this.logger.debug('Received send message event:', data);
-      if (!data.senderId || !data.groupId) {
-        throw new Error('senderId and groupId are required');
+      this.logger.debug('Received send message notification event:', data);
+      const { messageId, groupId, senderId } = data;
+      if (!messageId || !groupId || !senderId) {
+        throw new Error('messageId, groupId and senderId are required');
       }
-      const profileId = data.senderId;
+
+      // Kiểm tra quyền thành viên
       const isMember = await this.groupService.isGroupMember(
-        profileId,
-        data.groupId,
+        senderId,
+        groupId,
       );
       if (!isMember) {
         this.logger.warn(
-          `User ${profileId} tried to send a message to group ${data.groupId} but is not a member`,
+          `User ${senderId} tried to notify a message to group ${groupId} but is not a member`,
         );
         throw new Error('You are not a member of this group');
       }
 
-      const {
-        groupId,
-        message = '',
-        type = MessageType.TEXT,
-        fileData,
-        fileName,
-        mimeType,
-      } = data;
-
-      let file: Express.Multer.File | undefined = undefined;
-      let messageType = type;
-
-      // Handle file if present
-      if (fileData && mimeType) {
-        const buffer = Buffer.from(fileData, 'base64');
-        this.logger.debug(
-          `Processing file upload: filename=${fileName}, mimetype=${mimeType}, size=${buffer.length} bytes`,
-        );
-
-        file = {
-          buffer,
-          originalname: fileName || 'file',
-          mimetype: mimeType,
-          fieldname: 'file',
-          encoding: '7bit',
-          size: buffer.length,
-          destination: '',
-          filename: '',
-          path: '',
-        } as Express.Multer.File;
-
-        // Determine message type based on mimetype
-        if (mimeType.startsWith('image/')) {
-          messageType = MessageType.IMAGE;
-          this.logger.debug('File determined to be an image');
-        } else if (mimeType.startsWith('video/')) {
-          messageType = MessageType.VIDEO;
-          this.logger.debug('File determined to be a video');
-        }
+      // Lấy thông tin tin nhắn từ database
+      const messageResult = await this.chatService.getMessageById(messageId);
+      if (!messageResult) {
+        throw new Error('Message not found');
       }
 
       // Get active readers (users currently viewing this group)
@@ -589,21 +555,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         `Active readers for message in group ${groupId}: ${activeReaders.join(', ') || 'none'}`,
       );
 
-      const messageResult = await this.chatService.sendMessage(
-        profileId,
-        groupId,
-        message,
-        messageType,
-        activeReaders,
-        file,
-      );
-
-      this.logger.debug(
-        `Message created successfully: id=${messageResult.id}, type=${messageResult.type}`,
-      );
-      this.logger.debug(
-        `Read by: ${messageResult.readBy.map((r) => r.userId).join(', ') || 'none'}`,
-      );
+      // Nếu có active readers, cập nhật trạng thái đã đọc cho tin nhắn
+      if (activeReaders.length > 0) {
+        await this.chatService.markMessageAsReadByUsers(messageId, activeReaders);
+      }
 
       // Get all participants for this group
       const participants = await this.groupService.getGroupById(groupId);
@@ -614,7 +569,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       // Emit the message to everyone in the group chat room (active viewers)
       this.server.to(groupId).emit('newMessage', {
         ...messageResult,
-        readBy: messageResult.readBy.map((r) => r.userId),
+        readBy: messageResult.readBy?.map((r) => r.userId) || [],
       });
       this.logger.debug(`Emitted 'newMessage' event to group ${groupId}`);
 
@@ -644,7 +599,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
               groupId,
               message: {
                 ...messageResult,
-                readBy: messageResult.readBy.map((r) => r.userId),
+                readBy: messageResult.readBy?.map((r) => r.userId) || [],
               },
             });
           });
@@ -667,11 +622,144 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         }
       });
 
-      this.logger.debug(`Message sent successfully to group: ${groupId}`);
+      this.logger.debug(`Message notification sent successfully for group: ${groupId}`);
 
       return { status: 'success', data: messageResult };
     } catch (error) {
-      console.error('Error sending message via socket:', error);
+      console.error('Error processing message notification via socket:', error);
+      return { status: 'error', message: error.message };
+    }
+  }
+
+  @SubscribeMessage('recall')
+  async handleRecallMessage(
+    @MessageBody() data: { messageId: string; groupId: string },
+    @ConnectedSocket() client: Socket,
+  ) {
+    try {
+      const { messageId, groupId } = data;
+      if (!messageId || !groupId) {
+        throw new Error('messageId và groupId là bắt buộc');
+      }
+
+      this.logger.debug(`Nhận được sự kiện thu hồi tin nhắn: ${messageId}`);
+
+      // Thông báo cho tất cả người dùng trong group về tin nhắn đã thu hồi
+      this.server.to(groupId).emit('messageRecalled', {
+        messageId,
+        groupId,
+      });
+
+      return { status: 'success' };
+    } catch (error) {
+      this.logger.error(`Lỗi khi xử lý thu hồi tin nhắn: ${error.message}`);
+      return { status: 'error', message: error.message };
+    }
+  }
+
+  @SubscribeMessage('delete')
+  async handleDeleteMessage(
+    @MessageBody() data: { messageId: string; groupId: string; userId: string },
+    @ConnectedSocket() client: Socket,
+  ) {
+    try {
+      const { messageId, userId } = data;
+      if (!messageId || !userId) {
+        throw new Error('messageId và userId là bắt buộc');
+      }
+
+      this.logger.debug(`Nhận được sự kiện xóa tin nhắn: ${messageId} bởi người dùng ${userId}`);
+
+      // Không cần emit gì đến các người dùng khác vì đây là xóa cục bộ
+      // Chỉ thông báo cho người dùng đã xóa
+      client.emit('messageDeleted', {
+        messageId,
+        userId,
+      });
+
+      return { status: 'success' };
+    } catch (error) {
+      this.logger.error(`Lỗi khi xử lý xóa tin nhắn: ${error.message}`);
+      return { status: 'error', message: error.message };
+    }
+  }
+
+  @SubscribeMessage('forward')
+  async handleForwardMessage(
+    @MessageBody() data: { messageId: string; targetGroupId: string; senderId: string },
+    @ConnectedSocket() client: Socket,
+  ) {
+    try {
+      const { messageId, targetGroupId, senderId } = data;
+      if (!messageId || !targetGroupId || !senderId) {
+        throw new Error('messageId, targetGroupId và senderId là bắt buộc');
+      }
+
+      this.logger.debug(
+        `Nhận được sự kiện chuyển tiếp tin nhắn: ${messageId} đến group ${targetGroupId}`,
+      );
+
+      // Lấy thông tin tin nhắn đã được chuyển tiếp
+      const messageResult = await this.chatService.getMessageById(messageId);
+      if (!messageResult) {
+        throw new Error('Tin nhắn không tồn tại');
+      }
+
+      // Get active readers (users currently viewing this group)
+      const activeReaders = await this.getActiveViewers(targetGroupId);
+
+      // Thông báo cho tất cả người dùng trong group đích về tin nhắn mới
+      this.server.to(targetGroupId).emit('newMessage', {
+        ...messageResult,
+        readBy: messageResult.readBy?.map((r) => r.userId) || [],
+        isForwarded: true,
+        originalMessageId: messageId,
+      });
+
+      // Cập nhật unread counts cho những người dùng không đang xem group
+      // Get all participants for this group
+      const participants = await this.groupService.getGroupById(targetGroupId);
+
+      // For participants not actively viewing the group but online, send unread notification
+      participants.forEach(async (participantId) => {
+        // Skip if user is actively viewing the group
+        if (activeReaders.includes(participantId)) {
+          return;
+        }
+
+        // If user is online but not viewing this group, send notification
+        const userSockets = await this.redisService.smembers(
+          `${this.PROFILE_CONNECTIONS}${participantId}`,
+        );
+
+        if (userSockets.length > 0) {
+          userSockets.forEach((socketId) => {
+            this.server.to(socketId).emit('newNotification', {
+              type: 'NEW_MESSAGE',
+              groupId: targetGroupId,
+              message: {
+                ...messageResult,
+                readBy: messageResult.readBy?.map((r) => r.userId) || [],
+                isForwarded: true,
+                originalMessageId: messageId,
+              },
+            });
+          });
+
+          // Also update unread counts for these users
+          userSockets.forEach(async (socketId) => {
+            const unreadCounts =
+              await this.chatService.getUnreadMessageCountsByGroups(
+                participantId,
+              );
+            this.server.to(socketId).emit('unreadCountUpdated', unreadCounts);
+          });
+        }
+      });
+
+      return { status: 'success' };
+    } catch (error) {
+      this.logger.error(`Lỗi khi xử lý chuyển tiếp tin nhắn: ${error.message}`);
       return { status: 'error', message: error.message };
     }
   }

@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { MessageType } from '@prisma/client';
 import { CloudinaryService } from 'src/config/cloudinary/cloudinary.service';
 import { PrismaService } from 'src/config/prisma/prisma.service';
@@ -24,6 +24,21 @@ export class ChatService {
       `Sending message from ${senderId} to group ${groupId}: ${message} with type ${type}`,
     );
     this.logger.debug(`Active readers: ${activeReaders.join(', ') || 'none'}`);
+
+    // Kiểm tra người dùng có trong group không trước khi gửi tin nhắn
+    const participant = await this.prisma.participant.findUnique({
+      where: {
+        userId_groupId: {
+          userId: senderId,
+          groupId: groupId,
+        },
+      },
+    });
+
+    if (!participant) {
+      this.logger.warn(`User ${senderId} is not a member of group ${groupId}`);
+      throw new ForbiddenException(`Người dùng không phải là thành viên của nhóm chat này`);
+    }
 
     let imageUrl: string | undefined;
     let videoUrl: string | undefined;
@@ -59,7 +74,7 @@ export class ChatService {
 
     // Create read receipt data for sender and active readers
     const readByData = [
-      // Always add sender to readBy
+
       { userId: senderId },
       // Add other active readers
       ...activeReaders
@@ -222,13 +237,18 @@ export class ChatService {
     return results;
   }
 
-  async getLastMessages(groupId: string, limit: number = 10) {
+  async getLastMessages(groupId: string, userId: string, limit: number = 10) {
     this.logger.debug(`Fetching last ${limit} messages for group ${groupId}`);
 
     try {
       const messages = await this.prisma.message.findMany({
         where: {
           groupId,
+          deletedBy: {
+            none: {
+              userId,
+            },
+          },
         },
         orderBy: {
           createdAt: 'desc',
@@ -276,6 +296,243 @@ export class ChatService {
       return stickerUrl;
     } catch (error) {
       this.logger.error(`Error uploading sticker: ${error.message}`);
+      throw error;
+    }
+  }
+
+  async getMessageById(messageId: string, userId?: string) {
+    this.logger.debug(`Fetching message with ID: ${messageId}`);
+
+    try {
+      // Xây dựng điều kiện where dựa trên có userId hay không
+      const where: any = { id: messageId };
+
+      if (userId) {
+        // Sử dụng cách viết đúng cú pháp Prisma
+        where.NOT = {
+          deletedBy: {
+            some: {
+              userId,
+            },
+          },
+        };
+      }
+
+      const message = await this.prisma.message.findFirst({
+        where,
+        include: {
+          readBy: true,
+          sender: {
+            select: {
+              id: true,
+              name: true,
+              avatar: true,
+            },
+          },
+        },
+      });
+
+      if (!message) {
+        this.logger.warn(`Message with ID ${messageId} not found or deleted by user`);
+        return null;
+      }
+
+      this.logger.debug(`Retrieved message with ID: ${messageId}`);
+      return message;
+    } catch (error) {
+      this.logger.error(`Error fetching message with ID ${messageId}: ${error.message}`);
+      throw error;
+    }
+  }
+
+  async markMessageAsReadByUsers(messageId: string, userIds: string[]) {
+    this.logger.debug(
+      `Marking message ${messageId} as read by users: ${userIds.join(', ')}`,
+    );
+
+    if (userIds.length === 0) {
+      this.logger.debug('No users to mark message as read for');
+      return { count: 0 };
+    }
+
+    try {
+      // Lấy danh sách user chưa đọc tin nhắn
+      const message = await this.prisma.message.findUnique({
+        where: { id: messageId },
+        include: { readBy: true },
+      });
+
+      if (!message) {
+        this.logger.warn(`Message with ID ${messageId} not found`);
+        return { count: 0 };
+      }
+
+      // Lọc ra những user chưa đọc tin nhắn
+      const existingReaders = message.readBy.map(read => read.userId);
+      const newReaders = userIds.filter(userId => !existingReaders.includes(userId));
+
+      if (newReaders.length === 0) {
+        this.logger.debug('All specified users have already read the message');
+        return { count: 0 };
+      }
+
+      // Tạo read receipts cho các user chưa đọc
+      const readReceipts = await this.prisma.$transaction(
+        newReaders.map((userId) =>
+          this.prisma.readMessage.create({
+            data: {
+              messageId,
+              userId,
+            },
+          }),
+        ),
+      );
+
+      this.logger.debug(`Created ${readReceipts.length} read receipts`);
+      return {
+        count: readReceipts.length,
+        userIds: newReaders,
+      };
+    } catch (error) {
+      this.logger.error(
+        `Error marking message ${messageId} as read: ${error.message}`,
+      );
+      throw error;
+    }
+  }
+
+  async recallMessage(messageId: string, userId: string) {
+    this.logger.debug(`Recalling message ${messageId} by user ${userId}`);
+
+    try {
+      // Kiểm tra tin nhắn tồn tại
+      const message = await this.prisma.message.findUnique({
+        where: { id: messageId },
+      });
+
+      if (!message) {
+        throw new BadRequestException('Tin nhắn không tồn tại');
+      }
+
+      // Kiểm tra thời gian giới hạn thu hồi (15 phút)
+      const messageTime = new Date(message.createdAt);
+      const currentTime = new Date();
+      const timeDiffInMinutes = (currentTime.getTime() - messageTime.getTime()) / (1000 * 60);
+
+      if (timeDiffInMinutes > 15) {
+        throw new BadRequestException('Không thể thu hồi tin nhắn sau 15 phút');
+      }
+
+      // Cập nhật trạng thái thu hồi tin nhắn
+      const recalledMessage = await this.prisma.message.update({
+        where: { id: messageId },
+        data: {
+          isRecalled: true,
+          recalledAt: new Date(),
+        },
+        include: {
+          readBy: true,
+          sender: {
+            select: {
+              id: true,
+              name: true,
+              avatar: true,
+            },
+          },
+        },
+      });
+
+      return recalledMessage;
+    } catch (error) {
+      this.logger.error(`Error recalling message ${messageId}: ${error.message}`);
+      throw error;
+    }
+  }
+
+  async deleteMessage(messageId: string, userId: string) {
+    this.logger.debug(`Deleting message ${messageId} for user ${userId}`);
+
+    try {
+      // Kiểm tra tin nhắn tồn tại
+      const message = await this.prisma.message.findUnique({
+        where: { id: messageId },
+        include: { deletedBy: true },
+      });
+
+      if (!message) {
+        throw new BadRequestException('Tin nhắn không tồn tại');
+      }
+
+      // Kiểm tra người dùng đã xóa tin nhắn này chưa
+      const alreadyDeleted = message.deletedBy.some(del => del.userId === userId);
+      if (alreadyDeleted) {
+        throw new BadRequestException('Tin nhắn đã được xóa trước đó');
+      }
+
+      // Cập nhật trạng thái xóa tin nhắn cho người dùng
+      await this.prisma.deletedMessage.create({
+        data: {
+          messageId,
+          userId,
+        },
+      });
+
+      return { success: true, message: 'Đã xóa tin nhắn thành công' };
+    } catch (error) {
+      this.logger.error(`Error deleting message ${messageId}: ${error.message}`);
+      throw error;
+    }
+  }
+
+  async forwardMessage(messageId: string, targetGroupId: string, senderId: string) {
+    this.logger.debug(`Forwarding message ${messageId} to group ${targetGroupId} by user ${senderId}`);
+
+    try {
+      // Lấy thông tin tin nhắn cần chuyển tiếp
+      const originalMessage = await this.prisma.message.findUnique({
+        where: { id: messageId },
+      });
+
+      if (!originalMessage) {
+        throw new BadRequestException('Tin nhắn không tồn tại');
+      }
+
+      // Kiểm tra nếu tin nhắn đã bị thu hồi
+      if (originalMessage.isRecalled) {
+        throw new BadRequestException('Không thể chuyển tiếp tin nhắn đã thu hồi');
+      }
+
+      // Tạo tin nhắn mới với nội dung từ tin nhắn gốc
+      const forwardedMessage = await this.prisma.message.create({
+        data: {
+          senderId,
+          groupId: targetGroupId,
+          type: originalMessage.type,
+          content: originalMessage.content,
+          imageUrl: originalMessage.imageUrl,
+          videoUrl: originalMessage.videoUrl,
+          stickerUrl: originalMessage.stickerUrl,
+          forwardedFrom: messageId,
+          forwardedAt: new Date(),
+          readBy: {
+            create: [{ userId: senderId }],
+          },
+        },
+        include: {
+          readBy: true,
+          sender: {
+            select: {
+              id: true,
+              name: true,
+              avatar: true,
+            },
+          },
+        },
+      });
+
+      return forwardedMessage;
+    } catch (error) {
+      this.logger.error(`Error forwarding message ${messageId}: ${error.message}`);
       throw error;
     }
   }

@@ -97,23 +97,26 @@ model Participant {
 }
 
 model Message {
-  id              String        @id @default(auto()) @map("_id") @db.ObjectId
-  sender          Profile       @relation(fields: [senderId], references: [id], onDelete: Cascade)
-  senderId        String        @db.ObjectId
-  group           Group         @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  groupId         String        @db.ObjectId
+  id              String           @id @default(auto()) @map("_id") @db.ObjectId
+  sender          Profile          @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  senderId        String           @db.ObjectId
+  group           Group            @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  groupId         String           @db.ObjectId
   content         String?
   imageUrl        String?
   videoUrl        String?
   stickerUrl      String?
-  type            MessageType   @default(TEXT)
-  isRecalled      Boolean       @default(false)
+  type            MessageType      @default(TEXT)
+  isRecalled      Boolean          @default(false)
   recalledAt      DateTime?
   editedAt        DateTime?
   originalContent String?
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
   readBy          ReadMessage[]
+  deletedBy       DeletedMessage[]
+  forwardedFrom   String?          @db.ObjectId
+  forwardedAt     DateTime?
 
   @@index([groupId, createdAt(sort: Desc)])
   @@index([senderId])
@@ -135,4 +138,17 @@ model ReadMessage {
 
   @@unique([messageId, userId])
   @@index([messageId])
+}
+
+// Thêm model để lưu trữ thông tin xóa tin nhắn theo người dùng
+model DeletedMessage {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  messageId String   @db.ObjectId
+  userId    String   @db.ObjectId
+  deletedAt DateTime @default(now())
+
+  @@unique([messageId, userId])
+  @@index([messageId])
+  @@index([userId])
 }
