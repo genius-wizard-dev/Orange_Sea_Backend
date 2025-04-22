@@ -1,9 +1,15 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsOptional, IsString, Length, Matches } from 'class-validator';
+import {
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  Length,
+  Matches,
+} from 'class-validator';
 
 export class LoginDTO {
   @ApiProperty({
-    description: 'The username or email',
+    description: 'The username',
     minimum: 5,
     maximum: 50,
     required: false,
@@ -11,26 +17,17 @@ export class LoginDTO {
   @IsString()
   @Length(5, 50)
   @IsOptional()
-  username?: string;
-
-  // @ApiProperty({
-  //   description: 'The email',
-  //   minimum: 5,
-  //   maximum: 50,
-  //   required: false,
-  // })
-  // @IsString()
-  // @Length(5, 50)
-  // @IsOptional()
-  // email?: string;
+  username: string;
 
   @ApiProperty({ description: 'Mật khẩu', minLength: 5, maxLength: 50 })
+  @IsNotEmpty()
   @IsString()
-  @Length(5, 50)
+  @Length(6, 50)
   @Matches(
-    /^(?=.*[0-9])(?=.*[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?])[a-zA-Z0-9!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]{5,50}$/,
+    /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?])[A-Za-z\d!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]{6,}$/,
     {
-      message: 'Mật khẩu phải chứa ít nhất 1 chữ số và 1 ký tự đặc biệt',
+      message:
+        'Mật khẩu phải có ít nhất 6 ký tự, chứa chữ thường, chữ in hoa, số và ký tự đặc biệt',
     },
   )
   password: string;

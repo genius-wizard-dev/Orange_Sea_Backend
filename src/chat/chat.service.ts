@@ -1,4 +1,9 @@
-import { BadRequestException, ForbiddenException, Injectable, Logger } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  Logger,
+} from '@nestjs/common';
 import { MessageType } from '@prisma/client';
 import { CloudinaryService } from 'src/config/cloudinary/cloudinary.service';
 import { PrismaService } from 'src/config/prisma/prisma.service';
@@ -37,7 +42,9 @@ export class ChatService {
 
     if (!participant) {
       this.logger.warn(`User ${senderId} is not a member of group ${groupId}`);
-      throw new ForbiddenException(`Người dùng không phải là thành viên của nhóm chat này`);
+      throw new ForbiddenException(
+        `Người dùng không phải là thành viên của nhóm chat này`,
+      );
     }
 
     let imageUrl: string | undefined;
@@ -74,7 +81,6 @@ export class ChatService {
 
     // Create read receipt data for sender and active readers
     const readByData = [
-
       { userId: senderId },
       // Add other active readers
       ...activeReaders
@@ -333,14 +339,18 @@ export class ChatService {
       });
 
       if (!message) {
-        this.logger.warn(`Message with ID ${messageId} not found or deleted by user`);
+        this.logger.warn(
+          `Message with ID ${messageId} not found or deleted by user`,
+        );
         return null;
       }
 
       this.logger.debug(`Retrieved message with ID: ${messageId}`);
       return message;
     } catch (error) {
-      this.logger.error(`Error fetching message with ID ${messageId}: ${error.message}`);
+      this.logger.error(
+        `Error fetching message with ID ${messageId}: ${error.message}`,
+      );
       throw error;
     }
   }
@@ -368,8 +378,10 @@ export class ChatService {
       }
 
       // Lọc ra những user chưa đọc tin nhắn
-      const existingReaders = message.readBy.map(read => read.userId);
-      const newReaders = userIds.filter(userId => !existingReaders.includes(userId));
+      const existingReaders = message.readBy.map((read) => read.userId);
+      const newReaders = userIds.filter(
+        (userId) => !existingReaders.includes(userId),
+      );
 
       if (newReaders.length === 0) {
         this.logger.debug('All specified users have already read the message');
@@ -417,7 +429,8 @@ export class ChatService {
       // Kiểm tra thời gian giới hạn thu hồi (15 phút)
       const messageTime = new Date(message.createdAt);
       const currentTime = new Date();
-      const timeDiffInMinutes = (currentTime.getTime() - messageTime.getTime()) / (1000 * 60);
+      const timeDiffInMinutes =
+        (currentTime.getTime() - messageTime.getTime()) / (1000 * 60);
 
       if (timeDiffInMinutes > 15) {
         throw new BadRequestException('Không thể thu hồi tin nhắn sau 15 phút');
@@ -444,16 +457,25 @@ export class ChatService {
 
       return recalledMessage;
     } catch (error) {
-      this.logger.error(`Error recalling message ${messageId}: ${error.message}`);
+      this.logger.error(
+        `Error recalling message ${messageId}: ${error.message}`,
+      );
       throw error;
     }
   }
 
-  async deleteMessage(messageId: string, userId: string) {
-    this.logger.debug(`Deleting message ${messageId} for user ${userId}`);
+  async deleteMessage(messageId: string, accountId: string) {
+    this.logger.debug(`Deleting message ${messageId} for user ${accountId}`);
 
     try {
       // Kiểm tra tin nhắn tồn tại
+      const profile = await this.prisma.profile.findUnique({
+        where: { accountId },
+      });
+
+      if (!profile) {
+        throw new Error('Profile not found');
+      }
       const message = await this.prisma.message.findUnique({
         where: { id: messageId },
         include: { deletedBy: true },
@@ -464,7 +486,9 @@ export class ChatService {
       }
 
       // Kiểm tra người dùng đã xóa tin nhắn này chưa
-      const alreadyDeleted = message.deletedBy.some(del => del.userId === userId);
+      const alreadyDeleted = message.deletedBy.some(
+        (del) => del.userId === profile.id,
+      );
       if (alreadyDeleted) {
         throw new BadRequestException('Tin nhắn đã được xóa trước đó');
       }
@@ -473,19 +497,27 @@ export class ChatService {
       await this.prisma.deletedMessage.create({
         data: {
           messageId,
-          userId,
+          userId: profile.id,
         },
       });
 
       return { success: true, message: 'Đã xóa tin nhắn thành công' };
     } catch (error) {
-      this.logger.error(`Error deleting message ${messageId}: ${error.message}`);
+      this.logger.error(
+        `Error deleting message ${messageId}: ${error.message}`,
+      );
       throw error;
     }
   }
 
-  async forwardMessage(messageId: string, targetGroupId: string, senderId: string) {
-    this.logger.debug(`Forwarding message ${messageId} to group ${targetGroupId} by user ${senderId}`);
+  async forwardMessage(
+    messageId: string,
+    targetGroupId: string,
+    senderId: string,
+  ) {
+    this.logger.debug(
+      `Forwarding message ${messageId} to group ${targetGroupId} by user ${senderId}`,
+    );
 
     try {
       // Lấy thông tin tin nhắn cần chuyển tiếp
@@ -499,7 +531,9 @@ export class ChatService {
 
       // Kiểm tra nếu tin nhắn đã bị thu hồi
       if (originalMessage.isRecalled) {
-        throw new BadRequestException('Không thể chuyển tiếp tin nhắn đã thu hồi');
+        throw new BadRequestException(
+          'Không thể chuyển tiếp tin nhắn đã thu hồi',
+        );
       }
 
       // Tạo tin nhắn mới với nội dung từ tin nhắn gốc
@@ -532,7 +566,9 @@ export class ChatService {
 
       return forwardedMessage;
     } catch (error) {
-      this.logger.error(`Error forwarding message ${messageId}: ${error.message}`);
+      this.logger.error(
+        `Error forwarding message ${messageId}: ${error.message}`,
+      );
       throw error;
     }
   }

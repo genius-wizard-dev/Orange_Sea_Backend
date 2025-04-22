@@ -3,6 +3,7 @@ import { Role } from '@prisma/client';
 import {
   IsEmail,
   IsEnum,
+  IsNotEmpty,
   IsOptional,
   IsString,
   Length,
@@ -25,12 +26,14 @@ export class RegisterDTO {
   email: string;
 
   @ApiProperty({ description: 'Mật khẩu', minLength: 5, maxLength: 50 })
+  @IsNotEmpty()
   @IsString()
-  @Length(5, 50)
+  @Length(6, 50)
   @Matches(
-    /^(?=.*[0-9])(?=.*[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?])[a-zA-Z0-9!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]{5,50}$/,
+    /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?])[A-Za-z\d!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]{6,}$/,
     {
-      message: 'Mật khẩu phải chứa ít nhất 1 chữ số và 1 ký tự đặc biệt',
+      message:
+        'Mật khẩu phải có ít nhất 6 ký tự, chứa chữ thường, chữ in hoa, số và ký tự đặc biệt',
     },
   )
   password: string;
@@ -107,6 +110,15 @@ export class RegisterOtpVerifyDTO {
 }
 
 export class ResendOtpDto {
+  @ApiProperty({ description: 'Email đăng ký' })
+  @IsEmail()
+  email: string;
+}
+
+export class CheckRegister {
+  @ApiProperty({ description: 'Key xác thực' })
+  key: string;
+
   @ApiProperty({ description: 'Email đăng ký' })
   @IsEmail()
   email: string;

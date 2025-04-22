@@ -11,15 +11,39 @@ import {
   Request,
   UseGuards,
 } from '@nestjs/common';
+import {
+  ApiBearerAuth,
+  ApiBody,
+  ApiOperation,
+  ApiParam,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { JwtAuthGuard } from 'src/auth/guards/auth.guard';
-import { CreateFriendshipDto } from './dto/create.friendship.dto';
+import {
+  CreateFriendshipDto,
+  FriendResponse,
+  FriendshipResponseDto,
+  HandleFriendRequestDto,
+  UserSearchResponseDto,
+} from './dto';
 import { FriendshipService } from './friend.service';
 
+@ApiTags('friends')
+@ApiBearerAuth()
 @Controller('friend')
 export class FriendshipController {
   private readonly logger = new Logger(FriendshipController.name);
   constructor(private readonly friendshipService: FriendshipService) {}
 
+  @ApiOperation({ summary: 'Gửi yêu cầu kết bạn' })
+  @ApiResponse({
+    status: 201,
+    description: 'Yêu cầu kết bạn đã được gửi',
+    type: FriendshipResponseDto,
+  })
+  @ApiResponse({ status: 400, description: 'Yêu cầu không hợp lệ' })
+  @ApiResponse({ status: 401, description: 'Không được phép' })
   @UseGuards(JwtAuthGuard)
   @Post()
   async sendFriendRequest(
@@ -41,6 +65,13 @@ export class FriendshipController {
     }
   }
 
+  @ApiOperation({ summary: 'Lấy danh sách yêu cầu kết bạn đã nhận' })
+  @ApiResponse({
+    status: 200,
+    description: 'Danh sách yêu cầu kết bạn đã nhận',
+    type: [FriendResponse],
+  })
+  @ApiResponse({ status: 401, description: 'Không được phép' })
   @UseGuards(JwtAuthGuard)
   @Get('requests/received')
   async getReceivedRequests(@Request() req: any) {
@@ -58,6 +89,13 @@ export class FriendshipController {
     }
   }
 
+  @ApiOperation({ summary: 'Lấy danh sách yêu cầu kết bạn đã gửi' })
+  @ApiResponse({
+    status: 200,
+    description: 'Danh sách yêu cầu kết bạn đã gửi',
+    type: [FriendResponse],
+  })
+  @ApiResponse({ status: 401, description: 'Không được phép' })
   @UseGuards(JwtAuthGuard)
   @Get('requests/sent')
   async getSentRequests(@Request() req: any) {
@@ -75,28 +113,51 @@ export class FriendshipController {
     }
   }
 
+  @ApiOperation({ summary: 'Xử lý yêu cầu kết bạn' })
+  @ApiParam({
+    name: 'id',
+    description: 'ID của yêu cầu kết bạn',
+    example: 'profile-id',
+  })
+  @ApiBody({ type: HandleFriendRequestDto })
+  @ApiResponse({
+    status: 200,
+    description: 'Yêu cầu kết bạn đã được xử lý',
+    schema: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', example: 'success' },
+        message: {
+          type: 'string',
+          example: 'Yêu cầu kết bạn đã được chấp nhận',
+        },
+      },
+    },
+  })
+  @ApiResponse({ status: 400, description: 'Yêu cầu không hợp lệ' })
+  @ApiResponse({ status: 401, description: 'Không được phép' })
   @UseGuards(JwtAuthGuard)
   @Put('requests/:id')
   async handleFriendRequest(
     @Request() req: any,
     @Param('id') id: string,
-    @Body('action') action: 'ACCEPT' | 'REJECT',
+    @Body() dto: HandleFriendRequestDto,
   ) {
     if (!id) {
       throw new HttpException('ID không hợp lệ', HttpStatus.BAD_REQUEST);
     }
-    if (!['ACCEPT', 'REJECT'].includes(action)) {
+    if (!['ACCEPT', 'REJECT'].includes(dto.action)) {
       throw new HttpException('Hành động không hợp lệ', HttpStatus.BAD_REQUEST);
     }
     try {
       await this.friendshipService.handleFriendRequest(
         id,
         req.account.id,
-        action,
+        dto.action,
       );
       return {
         status: 'success',
-        message: `Yêu cầu kết bạn đã được ${action === 'ACCEPT' ? 'chấp nhận' : 'từ chối'}`,
+        message: `Yêu cầu kết bạn đã được ${dto.action === 'ACCEPT' ? 'chấp nhận' : 'từ chối'}`,
       };
     } catch (error) {
       this.logger.error(`Error handling friend request: ${error.message}`);
@@ -107,6 +168,13 @@ export class FriendshipController {
     }
   }
 
+  @ApiOperation({ summary: 'Lấy danh sách bạn bè' })
+  @ApiResponse({
+    status: 200,
+    description: 'Danh sách bạn bè',
+    type: [FriendResponse],
+  })
+  @ApiResponse({ status: 401, description: 'Không được phép' })
   @UseGuards(JwtAuthGuard)
   @Get()
   async getFriends(@Request() req: any) {
@@ -122,6 +190,25 @@ export class FriendshipController {
     }
   }
 
+  @ApiOperation({ summary: 'Xóa mối quan hệ bạn bè' })
+  @ApiParam({
+    name: 'id',
+    description: 'ID của mối quan hệ bạn bè',
+    example: 'profile-id',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Mối quan hệ bạn bè đã được xóa',
+    schema: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', example: 'success' },
+        message: { type: 'string', example: 'Mối quan hệ bạn bè đã được xóa' },
+      },
+    },
+  })
+  @ApiResponse({ status: 400, description: 'Yêu cầu không hợp lệ' })
+  @ApiResponse({ status: 401, description: 'Không được phép' })
   @UseGuards(JwtAuthGuard)
   @Put('delete/:id')
   async deleteFriendship(@Request() req: any, @Param('id') id: string) {
@@ -143,20 +230,26 @@ export class FriendshipController {
     }
   }
 
+  @ApiOperation({ summary: 'Tìm kiếm người dùng' })
+  @ApiParam({
+    name: 'keyword',
+    description: 'Từ khóa tìm kiếm (tên người dùng hoặc số điện thoại)',
+    example: 'nguyen',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Danh sách người dùng tìm thấy',
+    type: [UserSearchResponseDto],
+  })
+  @ApiResponse({ status: 401, description: 'Không được phép' })
   @UseGuards(JwtAuthGuard)
   @Get('search/:keyword')
-  async searchUser(
-    @Request() req: any,
-    @Param('keyword') keyword: string,
-  ) {
+  async searchUser(@Request() req: any, @Param('keyword') keyword: string) {
     try {
       this.logger.log(
         `Searching for user ${keyword} for account ${req.account.id}`,
       );
-      return await this.friendshipService.searchUser(
-        req.account.id,
-        keyword,
-      );
+      return await this.friendshipService.searchUser(req.account.id, keyword);
     } catch (error) {
       this.logger.error(`Error searching user: ${error.message}`);
       throw new HttpException(

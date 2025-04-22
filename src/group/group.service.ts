@@ -299,7 +299,7 @@ export class GroupService {
       throw error;
     }
   }
-  async isGroupMember(profileId: string, groupId: string): Promise<boolean> {
+  async isGroupMember(accountId: string, groupId: string): Promise<boolean> {
     try {
       const group = await this.prismaService.group.findUnique({
         where: { id: groupId },
@@ -314,7 +314,7 @@ export class GroupService {
       }
 
       const profile = await this.prismaService.profile.findUnique({
-        where: { id: profileId },
+        where: { accountId: accountId },
       });
       if (!profile) {
         throw new Error('Profile not found');
