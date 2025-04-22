@@ -1,7 +1,10 @@
 /* eslint-disable prettier/prettier */
 import { PrismaClient } from '@prisma/client';
 import { CreateFriendshipDto } from './dto/create.friendship.dto';
-import { use } from 'passport';
+import { FriendshipResponseDto } from './dto/friendship.response.dto';
+import { FriendResponse } from './dto/get.friend.dto';
+import { FriendRequestAction } from './dto/handle.request.dto';
+import { UserSearchResponseDto } from './dto/user.search.response.dto';
 
 export class FriendshipService {
   private prisma: PrismaClient;
@@ -13,7 +16,7 @@ export class FriendshipService {
   async sendFriendRequest(
     senderId: string,
     dto: CreateFriendshipDto,
-  ): Promise<{ id: string; status: string; message: string }> {
+  ): Promise<FriendshipResponseDto> {
     try {
       const senderProfile = await this.prisma.profile.findUnique({
         where: { accountId: senderId },
@@ -54,7 +57,7 @@ export class FriendshipService {
     }
   }
 
-  async getReceivedRequests(accountId: string): Promise<any[]> {
+  async getReceivedRequests(accountId: string): Promise<FriendResponse[]> {
     try {
       const receiverProfile = await this.prisma.profile.findUnique({
         where: { accountId },
@@ -92,7 +95,7 @@ export class FriendshipService {
     }
   }
 
-  async getSendingRequests(accountId: string): Promise<any[]> {
+  async getSendingRequests(accountId: string): Promise<FriendResponse[]> {
     try {
       const senderProfile = await this.prisma.profile.findUnique({
         where: { accountId },
@@ -134,7 +137,7 @@ export class FriendshipService {
   async handleFriendRequest(
     friendshipId: string,
     receiverId: string,
-    action: 'ACCEPT' | 'REJECT',
+    action: FriendRequestAction,
   ): Promise<void> {
     try {
       const receiverProfile = await this.prisma.profile.findUnique({
@@ -155,9 +158,12 @@ export class FriendshipService {
 
       await this.prisma.friendship.update({
         where: { id: friendshipId },
-        data: { status: action === 'ACCEPT' ? 'ACCEPTED' : 'REJECTED' },
+        data: {
+          status:
+            action === FriendRequestAction.ACCEPT ? 'ACCEPTED' : 'REJECTED',
+        },
       });
-      if (action === 'ACCEPT') {
+      if (action === FriendRequestAction.ACCEPT) {
         await this.prisma.group.create({
           data: {
             isGroup: false,
@@ -182,7 +188,7 @@ export class FriendshipService {
     }
   }
 
-  async getFriends(accountId: string): Promise<any[]> {
+  async getFriends(accountId: string): Promise<FriendResponse[]> {
     try {
       const profile = await this.prisma.profile.findUnique({
         where: { accountId },
@@ -303,7 +309,7 @@ export class FriendshipService {
   async searchUser(
     accountId: string,
     keyword: string,
-  ): Promise<any[]> {
+  ): Promise<UserSearchResponseDto[]> {
     try {
       // Ensure the requester has a profile
       const profile = await this.prisma.profile.findUnique({
@@ -319,7 +325,11 @@ export class FriendshipService {
             { accountId: { not: accountId } },
             {
               OR: [
-                { account: { username: { contains: keyword, mode: 'insensitive' } } },
+                {
+                  account: {
+                    username: { contains: keyword, mode: 'insensitive' },
+                  },
+                },
                 { phone: { contains: keyword } },
               ],
             },
@@ -336,7 +346,7 @@ export class FriendshipService {
         },
       });
 
-      return users.map(u => ({
+      return users.map((u) => ({
         id: u.id,
         username: u.account.username,
         name: u.name,
@@ -352,11 +362,11 @@ export class FriendshipService {
   //     const currentProfile = await this.prisma.profile.findUnique({
   //       where: { accountId },
   //     });
-  
+
   //     if (!currentProfile) {
   //       throw new Error('Người dùng không tồn tại');
   //     }
-  
+
   //     // Lấy tất cả các quan hệ bạn bè có liên quan đến current user
   //     const friendships = await this.prisma.friendship.findMany({
   //       where: {
@@ -371,14 +381,14 @@ export class FriendshipService {
   //         status: true,
   //       },
   //     });
-  
+
   //     // Tạo map để tra nhanh trạng thái quan hệ
   //     const relationMap: Record<string, { status: string; senderId: string }> = {};
   //     friendships.forEach(f => {
   //       const otherId = f.senderId === currentProfile.id ? f.receiverId : f.senderId;
   //       relationMap[otherId] = { status: f.status, senderId: f.senderId };
   //     });
-  
+
   //     // Tìm user theo keyword, loại trừ bản thân
   //     const users = await this.prisma.profile.findMany({
   //       where: {
@@ -398,12 +408,12 @@ export class FriendshipService {
   //         avatar: true,
   //       },
   //     });
-  
+
   //     // Gắn trạng thái quan hệ vào từng user
   //     return users.map(u => {
   //       const rel = relationMap[u.id];
   //       let relation: string;
-  
+
   //       if (!rel) {
   //         relation = 'NONE';
   //       } else if (rel.status === 'ACCEPTED') {
@@ -415,7 +425,7 @@ export class FriendshipService {
   //       } else {
   //         relation = 'UNKNOWN';
   //       }
-  
+
   //       return {
   //         id: u.id,
   //         name: u.name,
@@ -427,6 +437,4 @@ export class FriendshipService {
   //     await this.prisma.$disconnect();
   //   }
   // }
-  
-
 }

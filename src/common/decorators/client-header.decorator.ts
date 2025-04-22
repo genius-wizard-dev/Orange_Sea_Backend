@@ -2,9 +2,9 @@ import { createParamDecorator, ExecutionContext } from '@nestjs/common';
 import { getClientIp } from 'request-ip';
 
 export interface DeviceInfo {
-  deviceId: string;    // Required field
-  fcmToken?: string;   // Optional field
-  ip: string;         // Optional field
+  deviceId: string;
+  fcmToken?: string;
+  ip: string;
 }
 
 export const DeviceHeaders = createParamDecorator(
@@ -20,7 +20,7 @@ export const DeviceHeaders = createParamDecorator(
     return {
       deviceId,
       fcmToken: fcmToken || undefined,
-      ip: getClientIp(request) || "unknown",
+      ip: getClientIp(request) || 'unknown',
     };
   },
 );

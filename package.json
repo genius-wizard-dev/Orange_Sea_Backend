@@ -46,7 +46,8 @@
     "request-ip": "^3.3.0",
     "resend": "^4.1.2",
     "rxjs": "^7.8.1",
-    "uuid": "^11.1.0"
+    "uuid": "^11.1.0",
+    "zod": "^3.24.3"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",

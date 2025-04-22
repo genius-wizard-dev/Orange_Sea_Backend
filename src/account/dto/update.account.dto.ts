@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsString, Length } from 'class-validator';
+import { IsNotEmpty, IsString, Length, Matches } from 'class-validator';
 
 export class UpdatePasswordDTO {
   @ApiProperty({
@@ -9,7 +9,16 @@ export class UpdatePasswordDTO {
     required: true,
   })
   @IsString()
-  @Length(5, 50)
+  @IsNotEmpty()
+  @IsString()
+  @Length(6, 50)
+  @Matches(
+    /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?])[A-Za-z\d!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]{6,}$/,
+    {
+      message:
+        'Mật khẩu phải có ít nhất 6 ký tự, chứa chữ thường, chữ in hoa, số và ký tự đặc biệt',
+    },
+  )
   currentPassword: string;
 
   @ApiProperty({
@@ -18,7 +27,15 @@ export class UpdatePasswordDTO {
     maxLength: 50,
     required: true,
   })
+  @IsNotEmpty()
   @IsString()
-  @Length(5, 50)
+  @Length(6, 50)
+  @Matches(
+    /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?])[A-Za-z\d!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]{6,}$/,
+    {
+      message:
+        'Mật khẩu phải có ít nhất 6 ký tự, chứa chữ thường, chữ in hoa, số và ký tự đặc biệt',
+    },
+  )
   newPassword: string;
 }
