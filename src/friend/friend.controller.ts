@@ -258,4 +258,42 @@ export class FriendshipController {
       );
     }
   }
+
+  @ApiOperation({ summary: 'Kiểm tra mối quan hệ bạn bè' })
+  @ApiParam({
+    name: 'profileId',
+    description: 'ID của profile cần kiểm tra mối quan hệ',
+    example: 'profile-id',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Trạng thái mối quan hệ bạn bè',
+    schema: {
+      type: 'object',
+      properties: {
+        isFriend: { type: 'boolean', example: true },
+      },
+    },
+  })
+  @ApiResponse({ status: 401, description: 'Không được phép' })
+  @UseGuards(JwtAuthGuard)
+  @Get('check/:profileId')
+  async isFriend(@Request() req: any, @Param('profileId') profileId: string) {
+    try {
+      this.logger.log(
+        `Checking friendship status with ${profileId} for account ${req.account.id}`,
+      );
+      const isFriend = await this.friendshipService.isFriend(
+        req.account.id,
+        profileId,
+      );
+      return { isFriend };
+    } catch (error) {
+      this.logger.error(`Error checking friendship status: ${error.message}`);
+      throw new HttpException(
+        error.message,
+        error.status || HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
 }
