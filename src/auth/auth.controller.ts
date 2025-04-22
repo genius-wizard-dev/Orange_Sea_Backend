@@ -9,7 +9,12 @@ import {
   Res,
   UseGuards,
 } from '@nestjs/common';
-import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { Response } from 'express';
 import {
   DeviceHeaders,
@@ -20,6 +25,7 @@ import { AuthService } from './auth.service';
 import { ForgotPasswordDTO, ResetPasswordDTO } from './dto/forgot.password.dto';
 import { LoginDTO } from './dto/login.dto';
 import {
+  CheckRegister,
   RegisterDTO,
   RegisterOtpVerifyDTO,
   ResendOtpDto,
@@ -43,6 +49,7 @@ export class AuthController {
   async register(@Body() registerDto: RegisterDTO, @Res() res: Response) {
     try {
       const result = await this.authService.register(registerDto);
+
       return res.status(HttpStatus.OK).send({
         status: 'success',
         message: result.isPending
@@ -86,11 +93,7 @@ export class AuthController {
   @ApiOperation({ summary: 'Xác thực OTP và hoàn tất đăng ký' })
   @ApiResponse({ status: 200, description: 'Đăng ký thành công' })
   @ApiResponse({ status: 400, description: 'OTP không hợp lệ hoặc hết hạn' })
-  async checkRegister(
-    @Req() req: any,
-    @Res() res: any,
-    @Body() body: { key: string; email: string },
-  ) {
+  async checkRegister(@Res() res: any, @Body() body: CheckRegister) {
     try {
       if (body) {
         const key = body.key;
@@ -106,7 +109,7 @@ export class AuthController {
         }
       }
     } catch (error) {
-      return res.status(HttpStatus.FORBIDDEN).send({
+      return res.status(400).send({
         status: 'fail',
         message: error.message,
       });
@@ -184,6 +187,7 @@ export class AuthController {
   }
 
   @Post('refresh')
+  @ApiBearerAuth()
   @UseGuards(JwtRefreshGuard)
   @ApiOperation({ summary: 'Làm mới access token bằng refresh token' })
   @ApiResponse({ status: 200, description: 'Làm mới token thành công' })

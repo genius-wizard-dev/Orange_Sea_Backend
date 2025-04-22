@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import {
+  ApiBearerAuth,
   ApiConsumes,
   ApiOperation,
   ApiResponse,
@@ -28,6 +29,7 @@ export class ProfileController {
 
   @UseGuards(JwtAuthGuard)
   @Get('me')
+  @ApiBearerAuth()
   @ApiOperation({ summary: 'Lấy thông tin profile của người dùng hiện tại' })
   @ApiResponse({ status: 200, description: 'Lấy thông tin thành công' })
   @ApiResponse({ status: 401, description: 'Không có quyền truy cập' })
@@ -57,6 +59,7 @@ export class ProfileController {
   @Put('me')
   @UseInterceptors(FileInterceptor('avatar'))
   @ApiConsumes('multipart/form-data')
+  @ApiBearerAuth()
   @ApiOperation({ summary: 'Cập nhật profile của người dùng hiện tại' })
   @ApiResponse({ status: 200, description: 'Cập nhật thành công' })
   @ApiResponse({ status: 401, description: 'Không có quyền truy cập' })
@@ -98,6 +101,7 @@ export class ProfileController {
 
   @UseGuards(JwtAuthGuard)
   @Get(':id')
+  @ApiBearerAuth()
   @ApiOperation({ summary: 'Lấy thông tin profile theo ID' })
   @ApiResponse({ status: 200, description: 'Lấy thông tin thành công' })
   @ApiResponse({ status: 401, description: 'Không có quyền truy cập' })
@@ -124,6 +128,7 @@ export class ProfileController {
 
   @UseGuards(JwtAuthGuard)
   @Get('username/:username')
+  @ApiBearerAuth()
   @ApiOperation({ summary: 'Tìm kiếm profile theo username' })
   @ApiResponse({ status: 200, description: 'Tìm kiếm thành công' })
   @ApiResponse({ status: 401, description: 'Không có quyền truy cập' })
