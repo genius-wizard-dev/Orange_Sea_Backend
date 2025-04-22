@@ -521,7 +521,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   @SubscribeMessage('send')
   async handleSendMessage(
-    @MessageBody(new ValidationPipe()) data: { messageId: string; groupId: string; senderId: string },
+    @MessageBody(new ValidationPipe())
+    data: { messageId: string; groupId: string; senderId: string },
     @ConnectedSocket() client: Socket,
   ) {
     try {
@@ -532,10 +533,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       }
 
       // Kiểm tra quyền thành viên
-      const isMember = await this.groupService.isGroupMember(
-        senderId,
-        groupId,
-      );
+      const isMember = await this.groupService.isGroupMember(senderId, groupId);
       if (!isMember) {
         this.logger.warn(
           `User ${senderId} tried to notify a message to group ${groupId} but is not a member`,
@@ -557,7 +555,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       // Nếu có active readers, cập nhật trạng thái đã đọc cho tin nhắn
       if (activeReaders.length > 0) {
-        await this.chatService.markMessageAsReadByUsers(messageId, activeReaders);
+        await this.chatService.markMessageAsReadByUsers(
+          messageId,
+          activeReaders,
+        );
       }
 
       // Get all participants for this group
@@ -622,7 +623,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         }
       });
 
-      this.logger.debug(`Message notification sent successfully for group: ${groupId}`);
+      this.logger.debug(
+        `Message notification sent successfully for group: ${groupId}`,
+      );
 
       return { status: 'success', data: messageResult };
     } catch (error) {
@@ -657,36 +660,37 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
-  @SubscribeMessage('delete')
-  async handleDeleteMessage(
-    @MessageBody() data: { messageId: string; groupId: string; userId: string },
-    @ConnectedSocket() client: Socket,
-  ) {
-    try {
-      const { messageId, userId } = data;
-      if (!messageId || !userId) {
-        throw new Error('messageId và userId là bắt buộc');
-      }
+  // @SubscribeMessage('delete')
+  // async handleDeleteMessage(
+  //   @MessageBody() data: { messageId: string; groupId: string; userId: string },
+  //   @ConnectedSocket() client: Socket,
+  // ) {
+  //   try {
+  //     const { messageId, userId } = data;
+  //     if (!messageId || !userId) {
+  //       throw new Error('messageId và userId là bắt buộc');
+  //     }
 
-      this.logger.debug(`Nhận được sự kiện xóa tin nhắn: ${messageId} bởi người dùng ${userId}`);
+  //     this.logger.debug(`Nhận được sự kiện xóa tin nhắn: ${messageId} bởi người dùng ${userId}`);
 
-      // Không cần emit gì đến các người dùng khác vì đây là xóa cục bộ
-      // Chỉ thông báo cho người dùng đã xóa
-      client.emit('messageDeleted', {
-        messageId,
-        userId,
-      });
+  //     // Không cần emit gì đến các người dùng khác vì đây là xóa cục bộ
+  //     // Chỉ thông báo cho người dùng đã xóa
+  //     client.emit('messageDeleted', {
+  //       messageId,
+  //       userId,
+  //     });
 
-      return { status: 'success' };
-    } catch (error) {
-      this.logger.error(`Lỗi khi xử lý xóa tin nhắn: ${error.message}`);
-      return { status: 'error', message: error.message };
-    }
-  }
+  //     return { status: 'success' };
+  //   } catch (error) {
+  //     this.logger.error(`Lỗi khi xử lý xóa tin nhắn: ${error.message}`);
+  //     return { status: 'error', message: error.message };
+  //   }
+  // }
 
   @SubscribeMessage('forward')
   async handleForwardMessage(
-    @MessageBody() data: { messageId: string; targetGroupId: string; senderId: string },
+    @MessageBody()
+    data: { messageId: string; targetGroupId: string; senderId: string },
     @ConnectedSocket() client: Socket,
   ) {
     try {
