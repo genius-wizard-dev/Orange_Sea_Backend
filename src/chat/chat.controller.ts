@@ -28,7 +28,6 @@ import { ChatService } from './chat.service';
 import { ApiResponseDto } from './dto/chat-response.dto';
 import { ForwardMessageDto } from './dto/forward-message.dto';
 import { SendMessageDto } from './dto/send-message.dto';
-import { UploadStickerDto } from './dto/upload-sticker.dto';
 
 @ApiTags('Chat')
 @Controller('chat')
@@ -122,49 +121,49 @@ export class ChatController {
     }
   }
 
-  @Post('sticker')
-  @UseGuards(JwtAuthGuard)
-  @UseInterceptors(FileInterceptor('file'))
-  @ApiOperation({ summary: 'Tải lên sticker mới' })
-  @ApiConsumes('multipart/form-data')
-  @ApiBody({ type: UploadStickerDto })
-  @ApiResponse({
-    status: 200,
-    description: 'Sticker đã được tải lên thành công',
-    type: ApiResponseDto,
-    schema: {
-      properties: {
-        status: { type: 'string', example: 'success' },
-        statusCode: { type: 'number', example: 200 },
-        data: {
-          type: 'object',
-          properties: {
-            stickerUrl: {
-              type: 'string',
-              example:
-                'https://storage.example.com/stickers/123e4567-e89b-12d3-a456-426614174000.png',
-            },
-          },
-        },
-      },
-    },
-  })
-  @ApiResponse({ status: 400, description: 'Không có file nào được tải lên' })
-  async uploadSticker(@UploadedFile() file: Express.Multer.File) {
-    if (!file) {
-      return {
-        status: 'error',
-        message: 'No file uploaded',
-      };
-    }
+  // @Post('sticker')
+  // @UseGuards(JwtAuthGuard)
+  // @UseInterceptors(FileInterceptor('file'))
+  // @ApiOperation({ summary: 'Tải lên sticker mới' })
+  // @ApiConsumes('multipart/form-data')
+  // @ApiBody({ type: UploadStickerDto })
+  // @ApiResponse({
+  //   status: 200,
+  //   description: 'Sticker đã được tải lên thành công',
+  //   type: ApiResponseDto,
+  //   schema: {
+  //     properties: {
+  //       status: { type: 'string', example: 'success' },
+  //       statusCode: { type: 'number', example: 200 },
+  //       data: {
+  //         type: 'object',
+  //         properties: {
+  //           stickerUrl: {
+  //             type: 'string',
+  //             example:
+  //               'https://storage.example.com/stickers/123e4567-e89b-12d3-a456-426614174000.png',
+  //           },
+  //         },
+  //       },
+  //     },
+  //   },
+  // })
+  // @ApiResponse({ status: 400, description: 'Không có file nào được tải lên' })
+  // async uploadSticker(@UploadedFile() file: Express.Multer.File) {
+  //   if (!file) {
+  //     return {
+  //       status: 'error',
+  //       message: 'No file uploaded',
+  //     };
+  //   }
 
-    const stickerUrl = await this.chatService.uploadSticker(file);
+  //   const stickerUrl = await this.chatService.uploadSticker(file);
 
-    return {
-      status: 'success',
-      data: { stickerUrl },
-    };
-  }
+  //   return {
+  //     status: 'success',
+  //     data: { stickerUrl },
+  //   };
+  // }
 
   @Put('recall/:messageId')
   @UseGuards(JwtAuthGuard)
@@ -182,8 +181,9 @@ export class ChatController {
   })
   async recallMessage(@Param('messageId') messageId: string, @Req() req: any) {
     try {
-      const profileId = req.user.id;
-
+      const accountId = req.account.id;
+      const profile =
+        await this.groupService.getProfileFromAccountId(accountId);
       // Lấy thông tin tin nhắn
       const message = await this.chatService.getMessageById(messageId);
       if (!message) {
@@ -192,7 +192,7 @@ export class ChatController {
 
       // Kiểm tra người dùng có phải thành viên của nhóm không
       const isMember = await this.groupService.isGroupMember(
-        profileId,
+        profile.id,
         message.groupId,
       );
       if (!isMember) {
@@ -202,7 +202,7 @@ export class ChatController {
       }
 
       // Kiểm tra người gửi tin nhắn
-      if (message.senderId !== profileId) {
+      if (message.senderId !== accountId) {
         throw new ForbiddenException(
           'Bạn không thể thu hồi tin nhắn của người khác',
         );
@@ -210,7 +210,7 @@ export class ChatController {
 
       const recalledMessage = await this.chatService.recallMessage(
         messageId,
-        profileId,
+        profile.id,
       );
 
       return {
@@ -248,7 +248,8 @@ export class ChatController {
   async deleteMessage(@Param('messageId') messageId: string, @Req() req: any) {
     try {
       const accountId = req.account.id;
-
+      const profile =
+        await this.groupService.getProfileFromAccountId(accountId);
       const message = await this.chatService.getMessageById(messageId);
       if (!message) {
         throw new BadRequestException('Tin nhắn không tồn tại');
@@ -256,7 +257,7 @@ export class ChatController {
 
       // Kiểm tra người dùng có phải thành viên của nhóm không
       const isMember = await this.groupService.isGroupMember(
-        accountId,
+        profile.id,
         message.groupId,
       );
       if (!isMember) {
@@ -297,7 +298,9 @@ export class ChatController {
   })
   async forwardMessage(@Body() data: ForwardMessageDto, @Req() req: any) {
     try {
-      const profileId = req.user.id;
+      const accountId = req.account.id;
+      const profile =
+        await this.groupService.getProfileFromAccountId(accountId);
       const { messageId, targetGroupId } = data;
 
       // Lấy thông tin tin nhắn
@@ -308,7 +311,7 @@ export class ChatController {
 
       // Kiểm tra người dùng có phải thành viên của nhóm gốc không
       const isSourceMember = await this.groupService.isGroupMember(
-        profileId,
+        profile.id,
         message.groupId,
       );
       if (!isSourceMember) {
@@ -319,7 +322,7 @@ export class ChatController {
 
       // Kiểm tra người dùng có phải thành viên của nhóm đích không
       const isTargetMember = await this.groupService.isGroupMember(
-        profileId,
+        profile.id,
         targetGroupId,
       );
       if (!isTargetMember) {
@@ -331,7 +334,7 @@ export class ChatController {
       const forwardedMessage = await this.chatService.forwardMessage(
         messageId,
         targetGroupId,
-        profileId,
+        profile.id,
       );
 
       return {
