@@ -356,6 +356,42 @@ export class FriendshipService {
       await this.prisma.$disconnect();
     }
   }
+  async isFriend(
+    accountId: string,
+    profileId: string
+  ): Promise<boolean> {
+    try {
+      const userProfile = await this.prisma.profile.findUnique({
+        where: { accountId },
+      });
+
+      if (!userProfile) {
+        throw new Error('Người dùng không tồn tại');
+      }
+
+      // Check if there's an accepted friendship between the two users
+      const friendship = await this.prisma.friendship.findFirst({
+        where: {
+          OR: [
+            {
+              senderId: userProfile.id,
+              receiverId: profileId,
+              status: 'ACCEPTED'
+            },
+            {
+              senderId: profileId,
+              receiverId: userProfile.id,
+              status: 'ACCEPTED'
+            }
+          ]
+        }
+      });
+
+      return !!friendship;
+    } finally {
+      await this.prisma.$disconnect();
+    }
+  }
 
   // async searchUser(accountId: string, keyword: string): Promise<any[]> {
   //   try {
