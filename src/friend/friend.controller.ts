@@ -48,13 +48,13 @@ export class FriendshipController {
   @Post()
   async sendFriendRequest(
     @Request() req: any,
-    @Body() dto: CreateFriendshipDto,
+    @Body() data: CreateFriendshipDto,
   ) {
     try {
       this.logger.log(`Sending friend request from account ${req.account.id}`);
       return await this.friendshipService.sendFriendRequest(
         req.account.id,
-        dto,
+        data,
       );
     } catch (error) {
       this.logger.error(`Error sending friend request: ${error.message}`);

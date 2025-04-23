@@ -105,8 +105,10 @@ model Message {
   content         String?
   imageUrl        String?
   videoUrl        String?
-  stickerUrl      String?
+  fileUrl         String?
   type            MessageType      @default(TEXT)
+  fileName        String?
+  fileSize        Int?
   isRecalled      Boolean          @default(false)
   recalledAt      DateTime?
   editedAt        DateTime?
@@ -126,7 +128,7 @@ enum MessageType {
   TEXT
   IMAGE
   VIDEO
-  STICKER
+  RAW
 }
 
 model ReadMessage {

@@ -355,4 +355,47 @@ export class GroupService {
       throw error;
     }
   }
+
+  async searchGroups(accountId: string, searchTerm: string) {
+    try {
+      const profile = await this.getProfileFromAccountId(accountId);
+      const userId = profile.id;
+
+      return this.prismaService.group.findMany({
+        where: {
+          participants: {
+            some: {
+              userId,
+            },
+          },
+          name: {
+            contains: searchTerm,
+            mode: 'insensitive', // Case-insensitive search
+          },
+        },
+        include: {
+          participants: {
+            include: {
+              user: true,
+            },
+          },
+          messages: {
+            orderBy: {
+              createdAt: 'desc',
+            },
+            take: 1,
+          },
+        },
+        orderBy: {
+          updatedAt: 'desc',
+        },
+      });
+    } catch (error) {
+      this.logger.error(
+        `Error searching groups: ${error.message}`,
+        error.stack,
+      );
+      throw error;
+    }
+  }
 }
