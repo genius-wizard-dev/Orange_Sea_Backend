@@ -8,11 +8,6 @@ export class SendMessageDto {
   @IsString()
   groupId: string;
 
-  @ApiProperty({ description: 'ID của người gửi' })
-  @IsNotEmpty()
-  @IsString()
-  senderId: string;
-
   @ApiProperty({ description: 'Nội dung tin nhắn', required: false })
   @IsOptional()
   @IsString()

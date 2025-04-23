@@ -5,6 +5,7 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  Logger,
   Param,
   Post,
   Put,
@@ -23,10 +24,11 @@ import { JwtAuthGuard } from 'src/auth/guards/auth.guard';
 import { AddParticipantDto, CreateGroupDto, GroupResponseDto } from './dto';
 import { GroupService } from './group.service';
 
-@ApiTags('Groups')
+@ApiTags('Group')
 @ApiBearerAuth()
 @Controller('group')
 export class GroupController {
+  private readonly logger = new Logger(GroupController.name);
   constructor(private readonly groupService: GroupService) {}
 
   @Post()
@@ -44,14 +46,13 @@ export class GroupController {
       return this.groupService.createGroup(
         accountId,
         createGroupDto.participantIds,
-        createGroupDto.isGroup,
+        true,
         createGroupDto.name,
       );
     } else {
       return this.groupService.createGroup(
         accountId,
         createGroupDto.participantIds,
-        createGroupDto.isGroup,
       );
     }
   }
@@ -80,17 +81,40 @@ export class GroupController {
   async addParticipant(
     @Request() req,
     @Param('groupId') groupId: string,
-    @Body() addParticipantDto: AddParticipantDto,
+    @Body() body: AddParticipantDto,
   ) {
-    const accountId = req.account.id;
-    return this.groupService.addParticipant(
-      groupId,
-      accountId,
-      addParticipantDto.participantId,
-    );
+    try {
+      const accountId = req.account.id;
+      const isOwner = await this.groupService.isGroupOwner(accountId, groupId);
+      this.logger.debug(
+        `Account ID: ${accountId}, Group ID: ${groupId}, Is Owner: ${isOwner}`,
+      );
+      if (body.participantIds.length === 0)
+        return {
+          statusCode: HttpStatus.BAD_REQUEST,
+          message: 'Vui lòng chọn user cần thêm vào nhóm',
+        };
+      if (isOwner) {
+        return this.groupService.addParticipant(
+          groupId,
+          accountId,
+          body.participantIds,
+        );
+      } else {
+        return {
+          statusCode: HttpStatus.FORBIDDEN,
+          message: 'Bạn không có quyền thêm thành viên vào nhóm này',
+        };
+      }
+    } catch (error: any) {
+      return {
+        statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
+        message: error.message || 'Đã xảy ra lỗi khi thêm thành viên vào nhóm',
+      };
+    }
   }
 
-  @Delete(':groupId/participant/:participantId')
+  @Delete(':groupId/participant')
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Xóa thành viên khỏi nhóm' })
   @ApiParam({ name: 'groupId', description: 'ID của nhóm' })
@@ -102,14 +126,46 @@ export class GroupController {
   async removeParticipant(
     @Request() req,
     @Param('groupId') groupId: string,
-    @Param('participantId') participantId: string,
+    @Body() body: { participantIds: string[] },
   ) {
-    const accountId = req.account.id;
-    return this.groupService.removeParticipant(
-      groupId,
-      accountId,
-      participantId,
-    );
+    try {
+      const accountId = req.account.id;
+      const isOwner = await this.groupService.isGroupOwner(accountId, groupId);
+      this.logger.debug(
+        `Account ID: ${accountId}, Group ID: ${groupId}, Is Owner: ${isOwner}`,
+      );
+      if (body.participantIds.length === 0)
+        return {
+          statusCode: HttpStatus.BAD_REQUEST,
+          message: 'Vui lòng chọn user cần xóa khỏi nhóm',
+        };
+      if (isOwner) {
+        const result = await this.groupService.removeParticipants(
+          groupId,
+          accountId,
+          body.participantIds,
+        );
+
+        // If there were non-members, include them in the response
+        if (result.nonMembers) {
+          this.logger.debug(
+            `Some users were not members of the group: ${JSON.stringify(result.nonMembers)}`,
+          );
+        }
+
+        return result;
+      } else {
+        return {
+          statusCode: HttpStatus.FORBIDDEN,
+          message: 'Bạn không có quyền xóa thành viên khỏi nhóm này',
+        };
+      }
+    } catch (error: any) {
+      return {
+        statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
+        message: error.message || 'Đã xảy ra lỗi khi xóa thành viên khỏi nhóm',
+      };
+    }
   }
 
   @Delete(':groupId')
@@ -125,6 +181,69 @@ export class GroupController {
     return this.groupService.deleteGroup(groupId, accountId);
   }
 
+  @Delete(':groupId/leave')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Rời khỏi nhóm' })
+  @ApiParam({ name: 'groupId', description: 'ID của nhóm muốn rời' })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Đã rời khỏi nhóm thành công',
+  })
+  @ApiResponse({
+    status: HttpStatus.BAD_REQUEST,
+    description:
+      'Không thể rời khỏi nhóm (không phải nhóm hoặc bạn là chủ nhóm)',
+  })
+  async leaveGroup(@Request() req, @Param('groupId') groupId: string) {
+    try {
+      const accountId = req.account.id;
+      return this.groupService.leaveGroup(groupId, accountId);
+    } catch (error: any) {
+      return {
+        statusCode: HttpStatus.BAD_REQUEST,
+        message: error.message || 'Đã xảy ra lỗi khi rời khỏi nhóm',
+      };
+    }
+  }
+
+  @Put(':groupId/owner')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Chuyển quyền chủ nhóm' })
+  @ApiParam({ name: 'groupId', description: 'ID của nhóm' })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Đã chuyển quyền chủ nhóm thành công',
+  })
+  @ApiResponse({
+    status: HttpStatus.BAD_REQUEST,
+    description: 'Không thể chuyển quyền chủ nhóm',
+  })
+  async transferOwnership(
+    @Request() req,
+    @Param('groupId') groupId: string,
+    @Body() body: { newOwnerId: string },
+  ) {
+    try {
+      const accountId = req.account.id;
+      if (!body.newOwnerId) {
+        return {
+          statusCode: HttpStatus.BAD_REQUEST,
+          message: 'Vui lòng chọn thành viên để chuyển quyền chủ nhóm',
+        };
+      }
+      return this.groupService.transferOwnership(
+        groupId,
+        accountId,
+        body.newOwnerId,
+      );
+    } catch (error: any) {
+      return {
+        statusCode: HttpStatus.BAD_REQUEST,
+        message: error.message || 'Đã xảy ra lỗi khi chuyển quyền chủ nhóm',
+      };
+    }
+  }
+
   @Get('search/:keyword')
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Tìm kiếm nhóm theo tên' })
@@ -137,5 +256,30 @@ export class GroupController {
   async searchGroups(@Request() req, @Param('keyword') keyword: string) {
     const accountId = req.account.id;
     return this.groupService.searchGroups(accountId, keyword);
+  }
+
+  @Get(':groupId')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Lấy thông tin của nhóm' })
+  @ApiParam({ name: 'groupId', description: 'ID của nhóm' })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Thông tin chi tiết của nhóm',
+    type: GroupResponseDto,
+  })
+  @ApiResponse({
+    status: HttpStatus.FORBIDDEN,
+    description: 'Người dùng không phải là thành viên của nhóm',
+  })
+  async getGroupInfo(@Request() req: any, @Param('groupId') groupId: string) {
+    try {
+      const accountId = req.account.id;
+      return this.groupService.getGroupInfo(groupId, accountId);
+    } catch (error: any) {
+      return {
+        statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
+        message: error.message || 'Đã xảy ra lỗi khi lấy thông tin nhóm',
+      };
+    }
   }
 }

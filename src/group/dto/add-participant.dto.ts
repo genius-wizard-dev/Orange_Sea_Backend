@@ -8,5 +8,5 @@ export class AddParticipantDto {
   })
   @IsString()
   @IsNotEmpty()
-  participantId: string;
+  participantIds: string[];
 }
