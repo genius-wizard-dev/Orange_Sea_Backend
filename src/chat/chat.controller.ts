@@ -159,7 +159,7 @@ export class ChatController {
         groupId,
         message,
         type,
-        [], // không có active readers vì sẽ xử lý qua socket sau
+        [],
         file,
       );
 
@@ -173,12 +173,7 @@ export class ChatController {
       return {
         status: 'success',
         statusCode: 200,
-        data: {
-          messageId: messageResult.id,
-          groupId: messageResult.groupId,
-          senderId: messageResult.senderId,
-          message: messageResult,
-        },
+        data: messageResult,
       };
     } catch (error) {
       this.logger.error(`Error sending message: ${error.message}`, error.stack);
@@ -227,7 +222,7 @@ export class ChatController {
       }
 
       // Kiểm tra người gửi tin nhắn
-      if (message.senderId !== accountId) {
+      if (message.senderId !== profile.id) {
         throw new ForbiddenException(
           'Bạn không thể thu hồi tin nhắn của người khác',
         );
@@ -241,11 +236,7 @@ export class ChatController {
       return {
         status: 'success',
         statusCode: 200,
-        data: {
-          messageId: recalledMessage.id,
-          groupId: recalledMessage.groupId,
-          message: recalledMessage,
-        },
+        data: recalledMessage,
       };
     } catch (error) {
       return {
@@ -364,11 +355,7 @@ export class ChatController {
       return {
         status: 'success',
         statusCode: 200,
-        data: {
-          messageId: forwardedMessage.id,
-          groupId: forwardedMessage.groupId,
-          message: forwardedMessage,
-        },
+        data: forwardedMessage,
       };
     } catch (error) {
       return {

@@ -116,8 +116,6 @@ export class ChatService {
     }
 
     let fileUrl: string = '';
-    let imageUrl: string = '';
-    let videoUrl: string = '';
     let fileSize: number = 0;
     let fileName: string = '';
 
@@ -129,16 +127,6 @@ export class ChatService {
       fileUrl = fileResult.url;
       fileSize = fileResult.fileSize;
       fileName = fileResult.originalName;
-
-      // Set the appropriate URL based on type
-      switch (type) {
-        case MessageType.IMAGE:
-          imageUrl = fileUrl;
-          break;
-        case MessageType.VIDEO:
-          videoUrl = fileUrl;
-          break;
-      }
     }
 
     // Create read receipt data for sender and active readers
@@ -158,9 +146,7 @@ export class ChatService {
       groupId,
       type,
       content,
-      imageUrl,
-      videoUrl,
-      fileUrl: type === MessageType.RAW ? fileUrl : null,
+      fileUrl: file ? fileUrl : null,
       // Store file metadata if applicable
       fileSize: file ? fileSize : null,
       fileName: file ? fileName : null,
@@ -173,8 +159,18 @@ export class ChatService {
     const message = await this.prisma.message.create({
       data: messageData,
       include: {
-        readBy: true,
-        sender: true,
+        readBy: {
+          select: {
+            userId: true,
+          },
+        },
+        sender: {
+          select: {
+            id: true,
+            name: true,
+            avatar: true,
+          },
+        },
       },
     });
 
@@ -568,16 +564,6 @@ export class ChatService {
           isRecalled: true,
           recalledAt: new Date(),
         },
-        include: {
-          readBy: true,
-          sender: {
-            select: {
-              id: true,
-              name: true,
-              avatar: true,
-            },
-          },
-        },
       });
 
       return recalledMessage;
@@ -661,30 +647,17 @@ export class ChatService {
         );
       }
 
-      // Tạo tin nhắn mới với nội dung từ tin nhắn gốc
       const forwardedMessage = await this.prisma.message.create({
         data: {
           senderId,
           groupId: targetGroupId,
           type: originalMessage.type,
           content: originalMessage.content,
-          imageUrl: originalMessage.imageUrl,
-          videoUrl: originalMessage.videoUrl,
           fileUrl: originalMessage.fileUrl,
           forwardedFrom: messageId,
           forwardedAt: new Date(),
           readBy: {
             create: [{ userId: senderId }],
-          },
-        },
-        include: {
-          readBy: true,
-          sender: {
-            select: {
-              id: true,
-              name: true,
-              avatar: true,
-            },
           },
         },
       });

@@ -103,8 +103,6 @@ model Message {
   group           Group            @relation(fields: [groupId], references: [id], onDelete: Cascade)
   groupId         String           @db.ObjectId
   content         String?
-  imageUrl        String?
-  videoUrl        String?
   fileUrl         String?
   type            MessageType      @default(TEXT)
   fileName        String?
