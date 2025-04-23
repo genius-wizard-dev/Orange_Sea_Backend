@@ -124,4 +124,18 @@ export class GroupController {
     const accountId = req.account.id;
     return this.groupService.deleteGroup(groupId, accountId);
   }
+
+  @Get('search/:keyword')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Tìm kiếm nhóm theo tên' })
+  @ApiParam({ name: 'keyword', description: 'Từ khóa tìm kiếm' })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Danh sách nhóm phù hợp với từ khóa tìm kiếm',
+    type: [GroupResponseDto],
+  })
+  async searchGroups(@Request() req, @Param('keyword') keyword: string) {
+    const accountId = req.account.id;
+    return this.groupService.searchGroups(accountId, keyword);
+  }
 }

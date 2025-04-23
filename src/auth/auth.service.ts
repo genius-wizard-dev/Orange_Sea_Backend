@@ -273,7 +273,12 @@ export class AuthService {
     return Math.floor(100000 + Math.random() * 900000).toString();
   }
 
-  async logout(accessToken: string, ip: any, deviceId: string): Promise<void> {
+  async logout(
+    accessToken: string,
+    ip: any,
+    deviceId: string,
+    refreshToken: string,
+  ): Promise<void> {
     try {
       // Thu hồi access token
       if (accessToken) {
@@ -292,6 +297,17 @@ export class AuthService {
             );
             throw error; // Ném lỗi nếu không phải các trường hợp thông thường
           }
+        }
+      }
+
+      // Xóa device ID khỏi Redis hash (thông tin người dùng đang đăng nhập)
+      if (refreshToken) {
+        await this.tokenService.revokeRefreshToken(refreshToken, deviceId, ip);
+      } else {
+        // Trường hợp không có refreshToken, cố gắng giải mã accessToken để lấy user ID
+        const decodedToken = this.tokenService.decodeToken(accessToken);
+        if (decodedToken?.sub) {
+          await this.tokenService.removeDeviceById(decodedToken.sub, deviceId);
         }
       }
 

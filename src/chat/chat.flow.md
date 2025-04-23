@@ -13,6 +13,7 @@
    - [Luồng thu hồi tin nhắn](#luồng-thu-hồi-tin-nhắn)
    - [Luồng xóa tin nhắn](#luồng-xóa-tin-nhắn)
    - [Luồng chuyển tiếp tin nhắn](#luồng-chuyển-tiếp-tin-nhắn)
+   - [Luồng phân trang tin nhắn](#luồng-phân-trang-tin-nhắn)
 
 ## Cấu trúc dữ liệu
 
@@ -231,17 +232,18 @@ const socket = io('/chat');
 
 ### Sự kiện client gửi lên server
 
-| Sự kiện           | Dữ liệu                                                          | Mô tả                                       |
-| ----------------- | ---------------------------------------------------------------- | ------------------------------------------- |
-| `register`        | `{ profileId: string }`                                          | Đăng ký socket với profile ID               |
-| `open`            | `{ profileId: string, groupId: string }`                         | Mở một cuộc trò chuyện                      |
-| `leave`           | `{ profileId: string, groupId: string }`                         | Rời khỏi một cuộc trò chuyện                |
-| `markAsRead`      | `{ profileId: string, groupId: string }`                         | Đánh dấu đã đọc tất cả tin nhắn trong group |
-| `getUnreadCounts` | `{ profileId: string }`                                          | Lấy số tin nhắn chưa đọc theo group         |
-| `send`            | `{ messageId: string, groupId: string, senderId: string }`       | Thông báo tin nhắn mới đã được gửi          |
-| `recall`          | `{ messageId: string, groupId: string }`                         | Thông báo thu hồi tin nhắn                  |
-| `delete`          | `{ messageId: string, groupId: string, userId: string }`         | Thông báo xóa tin nhắn                      |
-| `forward`         | `{ messageId: string, targetGroupId: string, senderId: string }` | Thông báo chuyển tiếp tin nhắn              |
+| Sự kiện           | Dữ liệu                                                                   | Mô tả                                       |
+| ----------------- | ------------------------------------------------------------------------- | ------------------------------------------- |
+| `register`        | `{ profileId: string }`                                                   | Đăng ký socket với profile ID               |
+| `open`            | `{ profileId: string, groupId: string }`                                  | Mở một cuộc trò chuyện                      |
+| `leave`           | `{ profileId: string, groupId: string }`                                  | Rời khỏi một cuộc trò chuyện                |
+| `markAsRead`      | `{ profileId: string, groupId: string }`                                  | Đánh dấu đã đọc tất cả tin nhắn trong group |
+| `getUnreadCounts` | `{ profileId: string }`                                                   | Lấy số tin nhắn chưa đọc theo group         |
+| `send`            | `{ messageId: string, groupId: string, senderId: string }`                | Thông báo tin nhắn mới đã được gửi          |
+| `recall`          | `{ messageId: string, groupId: string }`                                  | Thông báo thu hồi tin nhắn                  |
+| `delete`          | `{ messageId: string, groupId: string, userId: string }`                  | Thông báo xóa tin nhắn                      |
+| `forward`         | `{ messageId: string, targetGroupId: string, senderId: string }`          | Thông báo chuyển tiếp tin nhắn              |
+| `loadMessages`    | `{ profileId: string, groupId: string, cursor?: string, limit?: number }` | Tải thêm tin nhắn cũ với phân trang         |
 
 ### Sự kiện server gửi xuống client
 
@@ -534,6 +536,105 @@ const socket = io('/chat');
        // Hiển thị UI đặc biệt cho tin nhắn được chuyển tiếp
      } else {
        // Hiển thị UI bình thường
+     }
+   });
+   ```
+
+### Luồng phân trang tin nhắn
+
+1. **Tải tin nhắn ban đầu**
+
+   Khi mở một cuộc trò chuyện, hệ thống sẽ tải 10 tin nhắn cuối cùng:
+
+   ```javascript
+   socket.emit('open', { profileId, groupId }, (response) => {
+     if (response.status === 'success') {
+       // Hiển thị tin nhắn ban đầu
+       const { messages, nextCursor, hasMore } = response;
+       displayMessages(messages);
+
+       // Lưu cursor để tải thêm tin nhắn nếu cần
+       if (hasMore) {
+         saveMessageCursor(nextCursor);
+         enableLoadMoreButton(true);
+       } else {
+         enableLoadMoreButton(false);
+       }
+     }
+   });
+   ```
+
+2. **Tải thêm tin nhắn cũ**
+
+   Khi người dùng cuộn lên để xem tin nhắn cũ hơn:
+
+   ```javascript
+   function loadMoreMessages() {
+     const cursor = getStoredMessageCursor();
+
+     socket.emit(
+       'loadMessages',
+       {
+         profileId,
+         groupId,
+         cursor,
+         limit: 10,
+       },
+       (response) => {
+         if (response.status === 'success') {
+           const { messages, nextCursor, hasMore } = response;
+
+           // Thêm tin nhắn vào đầu danh sách
+           prependMessages(messages);
+
+           // Cập nhật cursor mới
+           if (hasMore) {
+             saveMessageCursor(nextCursor);
+             enableLoadMoreButton(true);
+           } else {
+             enableLoadMoreButton(false);
+           }
+         }
+       },
+     );
+   }
+   ```
+
+3. **Cách hoạt động của cursor-based pagination**
+
+   - Hệ thống sử dụng ID của tin nhắn cuối cùng trong batch hiện tại làm cursor
+   - Khi tải thêm tin nhắn, cursor được sử dụng để tìm tin nhắn cũ hơn
+   - Tin nhắn được sắp xếp theo thời gian tạo (mới nhất -> cũ nhất) khi truy vấn
+   - Kết quả được đảo ngược trước khi trả về để hiển thị theo thứ tự thời gian (cũ nhất -> mới nhất)
+
+4. **Xử lý UI khi tải thêm tin nhắn**
+
+   ```javascript
+   // Ví dụ về cách hiển thị UI cho người dùng khi đang tải tin nhắn
+   function showLoadingIndicator() {
+     const loadingElement = document.createElement('div');
+     loadingElement.classList.add('message-loading');
+     loadingElement.textContent = 'Đang tải tin nhắn...';
+     messageContainer.prepend(loadingElement);
+   }
+
+   function hideLoadingIndicator() {
+     const loadingElement = document.querySelector('.message-loading');
+     if (loadingElement) {
+       loadingElement.remove();
+     }
+   }
+
+   // Đăng ký sự kiện scroll để tải thêm tin nhắn
+   messageContainer.addEventListener('scroll', function () {
+     // Kiểm tra nếu người dùng đã cuộn gần đến đầu container
+     if (messageContainer.scrollTop < 100 && hasMoreMessages && !isLoading) {
+       isLoading = true;
+       showLoadingIndicator();
+       loadMoreMessages().finally(() => {
+         hideLoadingIndicator();
+         isLoading = false;
+       });
      }
    });
    ```

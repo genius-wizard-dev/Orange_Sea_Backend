@@ -14,15 +14,20 @@ import { GroupService } from 'src/group/group.service';
 import { ChatService } from './chat.service';
 
 @WebSocketGateway({
-  cors: {
-    origin: '*',
-  },
+  cors: { origin: '*' },
   namespace: '/chat',
 })
 export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server: Server;
-  private readonly logger = new Logger(ChatGateway.name);
+
+  private readonly logger = new Logger(ChatGateway.name, { timestamp: true });
+
+  // Redis key prefixes
+  private readonly SOCKET_TO_PROFILE = 'socket:profile:';
+  private readonly PROFILE_CONNECTIONS = 'profile:connections:';
+  private readonly ACTIVE_GROUP_VIEWERS = 'group:viewers:';
+  private readonly SOCKET_TO_ACTIVE_GROUP = 'socket:group:';
 
   constructor(
     private readonly groupService: GroupService,
@@ -30,11 +35,70 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly redisService: RedisService,
   ) {}
 
-  // Redis key prefixes
-  private readonly SOCKET_TO_PROFILE = 'socket:profile:';
-  private readonly PROFILE_CONNECTIONS = 'profile:connections:';
-  private readonly ACTIVE_GROUP_VIEWERS = 'group:viewers:';
-  private readonly SOCKET_TO_ACTIVE_GROUP = 'socket:group:';
+  handleConnection(client: Socket) {
+    this.logger.log({ message: 'Socket connected', socketId: client.id });
+  }
+
+  async handleDisconnect(client: Socket) {
+    try {
+      const socketToProfileKey = `${this.SOCKET_TO_PROFILE}${client.id}`;
+      const socketToGroupKey = `${this.SOCKET_TO_ACTIVE_GROUP}${client.id}`;
+
+      const [profileId, activeGroupId] = await Promise.all([
+        this.redisService.get<string>(socketToProfileKey),
+        this.redisService.get<string>(socketToGroupKey),
+      ]);
+
+      if (!profileId) return;
+
+      const pipeline = this.redisService.multi();
+      const connectionsKey = `${this.PROFILE_CONNECTIONS}${profileId}`;
+      pipeline.srem(connectionsKey, client.id);
+      pipeline.del(socketToProfileKey);
+
+      if (activeGroupId) {
+        const viewersKey = `${this.ACTIVE_GROUP_VIEWERS}${activeGroupId}`;
+        pipeline.srem(viewersKey, profileId);
+        pipeline.del(socketToGroupKey);
+      }
+
+      await pipeline.exec();
+
+      if (activeGroupId && profileId) {
+        const remainingViewers = await this.redisService.smembers(
+          `${this.ACTIVE_GROUP_VIEWERS}${activeGroupId}`,
+        );
+        if (remainingViewers.length === 0) {
+          await this.redisService.del(
+            `${this.ACTIVE_GROUP_VIEWERS}${activeGroupId}`,
+          );
+        }
+        this.server.to(activeGroupId).emit('userStatusUpdate', {
+          profileId,
+          isActive: false,
+          groupId: activeGroupId,
+        });
+      }
+
+      const remainingConnections =
+        await this.redisService.scard(connectionsKey);
+      if (remainingConnections === 0) {
+        await this.redisService.del(connectionsKey);
+        await this.broadcastUserStatus(profileId, false);
+      }
+
+      this.logger.log({
+        message: 'Client disconnected',
+        socketId: client.id,
+        profileId,
+      });
+    } catch (error) {
+      this.logger.error({
+        message: 'Error handling disconnect',
+        error: error.message,
+      });
+    }
+  }
 
   @SubscribeMessage('register')
   async handleRegister(
@@ -43,150 +107,30 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   ) {
     try {
       const { profileId } = data;
-      if (!profileId) {
-        throw new Error('profileId is required');
-      }
+      if (!profileId) throw new Error('profileId is required');
 
-      // Store socket to profile mapping in Redis
-      await this.redisService.set(
-        `${this.SOCKET_TO_PROFILE}${client.id}`,
-        profileId,
-      );
-
-      // Add socket id to profile's connections SET (guarantees uniqueness)
-      const connectionsKey = `${this.PROFILE_CONNECTIONS}${profileId}`;
-      await this.redisService.sadd(connectionsKey, client.id);
-
-      this.logger.debug(
-        `User ${profileId} registered with socket ${client.id}`,
-      );
+      const pipeline = this.redisService.multi();
+      pipeline.set(`${this.SOCKET_TO_PROFILE}${client.id}`, profileId);
+      pipeline.sadd(`${this.PROFILE_CONNECTIONS}${profileId}`, client.id);
+      await pipeline.exec();
 
       await this.broadcastUserStatus(profileId, true);
-
       const unreadCounts =
         await this.chatService.getUnreadMessageCountsByGroups(profileId);
-      this.logger.debug(
-        `Initial unread counts for user ${profileId}: ${JSON.stringify(unreadCounts)}`,
-      );
       client.emit('initialUnreadCounts', unreadCounts);
 
+      this.logger.log({
+        message: 'User registered',
+        profileId,
+        socketId: client.id,
+      });
       return { status: 'success', message: 'Registered successfully' };
     } catch (error) {
-      this.logger.error(`Error registering user: ${error.message}`);
+      this.logger.error({
+        message: 'Error registering user',
+        error: error.message,
+      });
       return { status: 'error', message: error.message };
-    }
-  }
-
-  handleConnection(client: Socket) {
-    try {
-      this.logger.debug('Socket connected:', client.id);
-    } catch (error) {
-      console.error('Error in handleConnection:', error);
-    }
-  }
-
-  async handleDisconnect(client: Socket) {
-    try {
-      // Get profile ID associated with this socket
-      const profileId = await this.redisService.get<string>(
-        `${this.SOCKET_TO_PROFILE}${client.id}`,
-      );
-
-      // Get active group associated with this socket
-      const activeGroupId = await this.redisService.get<string>(
-        `${this.SOCKET_TO_ACTIVE_GROUP}${client.id}`,
-      );
-
-      this.logger.debug(
-        `Client disconnecting: ${client.id}, profileId: ${profileId}, activeGroupId: ${activeGroupId}`,
-      );
-
-      // Remove from active group if viewing one
-      if (activeGroupId && profileId) {
-        const viewersKey = `${this.ACTIVE_GROUP_VIEWERS}${activeGroupId}`;
-        // Remove user from active viewers set
-        await this.redisService.srem(viewersKey, profileId);
-
-        // Check if the set is now empty
-        const remainingViewers = await this.redisService.smembers(viewersKey);
-        if (remainingViewers.length === 0) {
-          await this.redisService.del(viewersKey);
-        }
-
-        // Notify group members about user leaving
-        this.server.to(activeGroupId).emit('userStatusUpdate', {
-          profileId,
-          isActive: false,
-          groupId: activeGroupId,
-        });
-
-        // Delete the socket to group mapping
-        await this.redisService.del(
-          `${this.SOCKET_TO_ACTIVE_GROUP}${client.id}`,
-        );
-      }
-
-      // Remove socket from user's connections
-      if (profileId) {
-        const connectionsKey = `${this.PROFILE_CONNECTIONS}${profileId}`;
-        // Remove socket from the user's connections set
-        await this.redisService.srem(connectionsKey, client.id);
-
-        // Check if the user has any remaining connections
-        const remainingConnections =
-          await this.redisService.smembers(connectionsKey);
-
-        if (remainingConnections.length === 0) {
-          await this.redisService.del(connectionsKey);
-          // User is completely offline, broadcast to all relevant groups
-          await this.broadcastUserStatus(profileId, false);
-          this.logger.debug(`User ${profileId} is now completely offline`);
-        } else {
-          this.logger.debug(
-            `Socket ${client.id} removed from connections for user ${profileId}, remaining sockets: ${remainingConnections.length}`,
-          );
-        }
-      }
-
-      // Delete the socket to profile mapping
-      await this.redisService.del(`${this.SOCKET_TO_PROFILE}${client.id}`);
-
-      this.logger.debug(`Client ${client.id} disconnected`);
-    } catch (error) {
-      this.logger.error(`Error handling disconnect: ${error.message}`);
-    }
-  }
-
-  private async broadcastUserStatus(profileId: string, isOnline: boolean) {
-    this.logger.debug(
-      `Broadcasting ${isOnline ? 'online' : 'offline'} status for user ${profileId}`,
-    );
-
-    try {
-      const groups = await this.groupService.getGroupsByProfileId(profileId);
-      this.logger.debug(
-        `User ${profileId} is a member of ${groups.length} groups`,
-      );
-
-      for (const group of groups) {
-        const viewersKey = `${this.ACTIVE_GROUP_VIEWERS}${group.id}`;
-        const viewers = (await this.redisService.smembers(viewersKey)) || [];
-        const isActive = viewers.includes(profileId);
-
-        this.logger.debug(
-          `Broadcasting status to group ${group.id}: user ${profileId} is ${isOnline ? 'online' : 'offline'} and ${
-            isActive ? 'active' : 'inactive'
-          } in this group`,
-        );
-
-        this.server.to(group.id).emit('userStatusUpdate', {
-          profileId,
-          isOnline,
-          isActive,
-        });
-      }
-    } catch (err) {
-      this.logger.error(`Error broadcasting user status: ${err.message}`);
     }
   }
 
@@ -196,326 +140,63 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() client: Socket,
   ) {
     try {
-      if (!data.profileId || !data.groupId) {
+      const { profileId, groupId } = data;
+      if (!profileId || !groupId)
         throw new Error('profileId and groupId are required');
-      }
 
-      this.logger.debug(
-        `User ${data.profileId} is opening group ${data.groupId}`,
-      );
+      await this.validateGroupMembership(profileId, groupId);
+      await this.handlePreviousGroup(client, profileId, groupId);
 
-      const isMember = await this.groupService.isGroupMember(
-        data.profileId,
-        data.groupId,
-      );
+      const pipeline = this.redisService.multi();
+      pipeline.set(`${this.SOCKET_TO_ACTIVE_GROUP}${client.id}`, groupId);
+      pipeline.sadd(`${this.ACTIVE_GROUP_VIEWERS}${groupId}`, profileId);
+      await pipeline.exec();
 
-      if (!isMember) {
-        this.logger.warn(
-          `User ${data.profileId} tried to open group ${data.groupId} but is not a member`,
-        );
-        throw new Error('You are not a member of this group');
-      }
-
-      // Check if socket was previously in another room
-      const previousGroup = await this.redisService.get<string>(
-        `${this.SOCKET_TO_ACTIVE_GROUP}${client.id}`,
-      );
-      if (previousGroup && previousGroup !== data.groupId) {
-        this.logger.debug(
-          `User ${data.profileId} was previously in group ${previousGroup}, leaving that group first`,
-        );
-        await this.handleLeaveRoom(
-          { profileId: data.profileId, groupId: previousGroup },
-          client,
-        );
-      }
-
-      // Update active group for this socket in Redis
-      await this.redisService.set(
-        `${this.SOCKET_TO_ACTIVE_GROUP}${client.id}`,
-        data.groupId,
-      );
-      this.logger.debug(
-        `Updated socketToActiveGroup mapping: ${client.id} -> ${data.groupId}`,
-      );
-
-      // Add to active viewers for this group in Redis using SET
-      const viewersKey = `${this.ACTIVE_GROUP_VIEWERS}${data.groupId}`;
-      await this.redisService.sadd(viewersKey, data.profileId);
-
-      const viewers = await this.redisService.smembers(viewersKey);
-      this.logger.debug(
-        `Active viewers for group ${data.groupId}: ${viewers.join(', ')}`,
-      );
-
-      // Join socket room to receive messages
-      client.join(data.groupId);
-
-      this.logger.debug(
-        `User ${data.profileId} is now viewing chat in group ${data.groupId}`,
-      );
-
-      // Notify other group members about active user
-      this.server.to(data.groupId).emit('userStatusUpdate', {
-        profileId: data.profileId,
+      client.join(groupId);
+      this.server.to(groupId).emit('userStatusUpdate', {
+        profileId,
         isOnline: true,
         isActive: true,
-        groupId: data.groupId,
+        groupId,
       });
-
-      // Mark messages as read since user is now viewing this group
-      const markResult = await this.chatService.markMessagesAsRead(
-        data.profileId,
-        data.groupId,
-      );
-
-      this.logger.debug(
-        `Marked ${markResult.count} messages as read for user ${data.profileId} in group ${data.groupId}`,
-      );
-
-      if (markResult.count > 0) {
-        this.logger.debug(
-          `Message IDs marked as read: ${markResult.messageIds?.join(', ')}`,
-        );
-
-        // Notify group that user has read messages
-        this.server.to(data.groupId).emit('messagesRead', {
-          profileId: data.profileId,
-          groupId: data.groupId,
-          messageIds: markResult.messageIds,
-        });
-
-        // Update unread count for this user
-        const unreadCounts =
-          await this.chatService.getUnreadMessageCountsByGroups(data.profileId);
-        this.logger.debug(
-          `Updated unread counts: ${JSON.stringify(unreadCounts)}`,
-        );
-        this.server.to(client.id).emit('unreadCountUpdated', unreadCounts);
-      }
-
-      // Get last 10 messages for this group (lọc theo tin nhắn chưa bị xóa bởi người dùng)
-      const lastMessages = await this.chatService.getLastMessages(
-        data.groupId,
-        data.profileId,
-        10,
-      );
-      this.logger.debug(
-        `Retrieved ${lastMessages.length} messages for group ${data.groupId}`,
-      );
-
-      // Return active users and last messages
-      const activeUsers = await this.redisService.smembers(
-        `${this.ACTIVE_GROUP_VIEWERS}${data.groupId}`,
-      );
-
-      this.logger.debug(
-        `Returning active users for group ${data.groupId}: ${activeUsers.join(', ')}`,
-      );
-
-      return {
-        status: 'success',
-        activeUsers,
-        lastMessages, // Include last messages in the response
-      };
-    } catch (error) {
-      this.logger.error(`Error opening chat: ${error.message}`);
-      client.emit('socketError', {
-        message: 'Failed to open chat',
-        error: error.message,
-      });
-    }
-  }
-
-  @SubscribeMessage('leave')
-  async handleLeaveRoom(
-    @MessageBody() data: { profileId: string; groupId: string },
-    @ConnectedSocket() client: Socket,
-  ) {
-    try {
-      if (!data.profileId || !data.groupId) {
-        throw new Error('profileId and groupId are required');
-      }
-
-      this.logger.debug(
-        `User ${data.profileId} is leaving group ${data.groupId}`,
-      );
-
-      // Leave socket room
-      client.leave(data.groupId);
-
-      // Remove from active viewers in Redis using srem
-      const viewersKey = `${this.ACTIVE_GROUP_VIEWERS}${data.groupId}`;
-      await this.redisService.srem(viewersKey, data.profileId);
-
-      // Check if anyone is still viewing this group
-      const remainingViewers = await this.redisService.smembers(viewersKey);
-
-      if (remainingViewers.length > 0) {
-        this.logger.debug(
-          `User ${data.profileId} removed from active viewers of group ${data.groupId}, remaining viewers: ${remainingViewers.join(', ') || 'none'}`,
-        );
-      } else {
-        await this.redisService.del(viewersKey);
-        this.logger.debug(
-          `No more active viewers for group ${data.groupId}, removing group from tracking`,
-        );
-      }
-
-      // Clear active group for this socket in Redis
-      const currentActiveGroup = await this.redisService.get<string>(
-        `${this.SOCKET_TO_ACTIVE_GROUP}${client.id}`,
-      );
-      if (currentActiveGroup === data.groupId) {
-        await this.redisService.del(
-          `${this.SOCKET_TO_ACTIVE_GROUP}${client.id}`,
-        );
-        this.logger.debug(
-          `Removed socket ${client.id} from activeGroup mapping`,
-        );
-      }
-
-      this.logger.debug(
-        `User ${data.profileId} closed chat in group ${data.groupId}`,
-      );
-
-      // Notify group members about user leaving
-      this.server.to(data.groupId).emit('userStatusUpdate', {
-        profileId: data.profileId,
-        isOnline: await this.isProfileOnline(data.profileId),
-        isActive: false,
-        groupId: data.groupId,
-      });
-
-      return { status: 'success' };
-    } catch (error) {
-      this.logger.error(`Error closing chat: ${error.message}`);
-      client.emit('socketError', {
-        message: 'Failed to close chat',
-        error: error.message,
-      });
-    }
-  }
-
-  // Helper method to check if a profile is online
-  private async isProfileOnline(profileId: string): Promise<boolean> {
-    const connections = await this.redisService.smembers(
-      `${this.PROFILE_CONNECTIONS}${profileId}`,
-    );
-    return connections.length > 0;
-  }
-
-  // Get active viewers for a group
-  private async getActiveViewers(groupId: string): Promise<string[]> {
-    return await this.redisService.smembers(
-      `${this.ACTIVE_GROUP_VIEWERS}${groupId}`,
-    );
-  }
-
-  @SubscribeMessage('getActiveUsers')
-  async handleGetActiveUsers(
-    @MessageBody() data: { groupId: string },
-    @ConnectedSocket() client: Socket,
-  ) {
-    try {
-      const { groupId } = data;
-      if (!groupId) {
-        throw new Error('groupId is required');
-      }
-
-      const activeUsers = await this.getActiveViewers(groupId);
-      this.logger.debug(
-        `Active users for group ${groupId}: ${activeUsers.join(', ')}`,
-      );
-      return { status: 'success', activeUsers };
-    } catch (error) {
-      this.logger.error(`Error getting active users: ${error.message}`);
-      return { status: 'error', message: error.message };
-    }
-  }
-
-  @SubscribeMessage('markAsRead')
-  async handleMarkAsRead(
-    @MessageBody() data: { profileId: string; groupId: string },
-    @ConnectedSocket() client: Socket,
-  ) {
-    try {
-      const { profileId, groupId } = data;
-      if (!profileId || !groupId) {
-        throw new Error('profileId and groupId are required');
-      }
-
-      this.logger.debug(
-        `User ${profileId} is manually marking messages as read in group ${groupId}`,
-      );
 
       const markResult = await this.chatService.markMessagesAsRead(
         profileId,
         groupId,
       );
-
-      this.logger.debug(
-        `Manually marked ${markResult.count} messages as read for user ${profileId} in group ${groupId}`,
-      );
-
       if (markResult.count > 0) {
-        this.logger.debug(
-          `Message IDs manually marked as read: ${markResult.messageIds?.join(', ')}`,
-        );
-
-        // Notify the group that messages have been read
         this.server.to(groupId).emit('messagesRead', {
           profileId,
           groupId,
           messageIds: markResult.messageIds,
         });
-
-        // Update unread counts for this user
         const unreadCounts =
           await this.chatService.getUnreadMessageCountsByGroups(profileId);
-        this.logger.debug(
-          `Updated unread counts after marking as read: ${JSON.stringify(unreadCounts)}`,
-        );
-        client.emit('unreadCountUpdated', unreadCounts);
+        this.server.to(client.id).emit('unreadCountUpdated', unreadCounts);
       }
 
+      const [messageData, activeUsers] = await Promise.all([
+        this.chatService.getMessagesPaginated(groupId, profileId, 10),
+        this.redisService.smembers(`${this.ACTIVE_GROUP_VIEWERS}${groupId}`),
+      ]);
+
+      this.logger.log({ message: 'User joined group', profileId, groupId });
       return {
         status: 'success',
-        count: markResult.count,
+        activeUsers,
+        messages: messageData.messages,
+        nextCursor: messageData.nextCursor,
+        hasMore: messageData.hasMore,
       };
     } catch (error) {
-      this.logger.error(`Error marking messages as read: ${error.message}`);
-      return { status: 'error', message: error.message };
-    }
-  }
-
-  @SubscribeMessage('getUnreadCounts')
-  async handleGetUnreadCounts(
-    @MessageBody() data: { profileId: string },
-    @ConnectedSocket() client: Socket,
-  ) {
-    try {
-      const { profileId } = data;
-      if (!profileId) {
-        throw new Error('profileId is required');
-      }
-
-      this.logger.debug(`Getting unread counts for user ${profileId}`);
-
-      const unreadCounts =
-        await this.chatService.getUnreadMessageCountsByGroups(profileId);
-
-      this.logger.debug(
-        `Unread counts for user ${profileId}: ${JSON.stringify(unreadCounts)}`,
-      );
-
-      return {
-        status: 'success',
-        unreadCounts,
-      };
-    } catch (error) {
-      this.logger.error(`Error getting unread counts: ${error.message}`);
-      return { status: 'error', message: error.message };
+      this.logger.error({
+        message: 'Error opening chat',
+        error: error.message,
+      });
+      client.emit('socketError', {
+        message: 'Failed to open chat',
+        error: error.message,
+      });
     }
   }
 
@@ -526,34 +207,15 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() client: Socket,
   ) {
     try {
-      this.logger.debug('Received send message notification event:', data);
       const { messageId, groupId, senderId } = data;
-      if (!messageId || !groupId || !senderId) {
+      if (!messageId || !groupId || !senderId)
         throw new Error('messageId, groupId and senderId are required');
-      }
 
-      // Kiểm tra quyền thành viên
-      const isMember = await this.groupService.isGroupMember(senderId, groupId);
-      if (!isMember) {
-        this.logger.warn(
-          `User ${senderId} tried to notify a message to group ${groupId} but is not a member`,
-        );
-        throw new Error('You are not a member of this group');
-      }
-
-      // Lấy thông tin tin nhắn từ database
+      await this.validateGroupMembership(senderId, groupId);
       const messageResult = await this.chatService.getMessageById(messageId);
-      if (!messageResult) {
-        throw new Error('Message not found');
-      }
+      if (!messageResult) throw new Error('Message not found');
 
-      // Get active readers (users currently viewing this group)
       const activeReaders = await this.getActiveViewers(groupId);
-      this.logger.debug(
-        `Active readers for message in group ${groupId}: ${activeReaders.join(', ') || 'none'}`,
-      );
-
-      // Nếu có active readers, cập nhật trạng thái đã đọc cho tin nhắn
       if (activeReaders.length > 0) {
         await this.chatService.markMessageAsReadByUsers(
           messageId,
@@ -561,75 +223,49 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         );
       }
 
-      // Get all participants for this group
-      const participants = await this.groupService.getGroupById(groupId);
-      this.logger.debug(
-        `Group ${groupId} participants: ${participants.join(', ')}`,
-      );
-
-      // Emit the message to everyone in the group chat room (active viewers)
-      this.server.to(groupId).emit('newMessage', {
+      const participants = await this.getCachedGroupParticipants(groupId);
+      const messageData = {
         ...messageResult,
         readBy: messageResult.readBy?.map((r) => r.userId) || [],
-      });
-      this.logger.debug(`Emitted 'newMessage' event to group ${groupId}`);
+      };
 
-      // For participants not actively viewing the group but online, send unread notification
-      participants.forEach(async (participantId) => {
-        // Skip if user is actively viewing the group
-        if (activeReaders.includes(participantId)) {
-          this.logger.debug(
-            `Skipping notification for user ${participantId} who is actively viewing the group`,
-          );
-          return;
-        }
+      this.server.to(groupId).emit('newMessage', messageData);
 
-        // If user is online but not viewing this group, send notification
+      const notificationPromises = participants.map(async (participantId) => {
+        if (activeReaders.includes(participantId)) return;
+
         const userSockets = await this.redisService.smembers(
           `${this.PROFILE_CONNECTIONS}${participantId}`,
         );
-
         if (userSockets.length > 0) {
-          this.logger.debug(
-            `Sending notification to user ${participantId} who is online but not viewing the group, via sockets: ${userSockets.join(', ')}`,
-          );
-
+          const unreadCounts =
+            await this.chatService.getUnreadMessageCountsByGroups(
+              participantId,
+            );
           userSockets.forEach((socketId) => {
-            this.server.to(socketId).emit('newNotification', {
+            this.server.to(socketId).emit('messageUpdate', {
               type: 'NEW_MESSAGE',
               groupId,
-              message: {
-                ...messageResult,
-                readBy: messageResult.readBy?.map((r) => r.userId) || [],
-              },
+              message: messageData,
+              unreadCounts,
             });
           });
-
-          // Also update unread counts for these users
-          userSockets.forEach(async (socketId) => {
-            const unreadCounts =
-              await this.chatService.getUnreadMessageCountsByGroups(
-                participantId,
-              );
-            this.logger.debug(
-              `Updated unread counts for user ${participantId}: ${JSON.stringify(unreadCounts)}`,
-            );
-            this.server.to(socketId).emit('unreadCountUpdated', unreadCounts);
-          });
-        } else {
-          this.logger.debug(
-            `User ${participantId} is offline, no notification sent`,
-          );
         }
       });
 
-      this.logger.debug(
-        `Message notification sent successfully for group: ${groupId}`,
-      );
-
+      await Promise.all(notificationPromises);
+      this.logger.log({
+        message: 'Message sent',
+        messageId,
+        groupId,
+        senderId,
+      });
       return { status: 'success', data: messageResult };
     } catch (error) {
-      console.error('Error processing message notification via socket:', error);
+      this.logger.error({
+        message: 'Error processing message',
+        error: error.message,
+      });
       return { status: 'error', message: error.message };
     }
   }
@@ -641,51 +277,20 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   ) {
     try {
       const { messageId, groupId } = data;
-      if (!messageId || !groupId) {
-        throw new Error('messageId và groupId là bắt buộc');
-      }
+      if (!messageId || !groupId)
+        throw new Error('messageId and groupId are required');
 
-      this.logger.debug(`Nhận được sự kiện thu hồi tin nhắn: ${messageId}`);
-
-      // Thông báo cho tất cả người dùng trong group về tin nhắn đã thu hồi
-      this.server.to(groupId).emit('messageRecalled', {
-        messageId,
-        groupId,
-      });
-
+      this.server.to(groupId).emit('messageRecalled', { messageId, groupId });
+      this.logger.log({ message: 'Message recalled', messageId, groupId });
       return { status: 'success' };
     } catch (error) {
-      this.logger.error(`Lỗi khi xử lý thu hồi tin nhắn: ${error.message}`);
+      this.logger.error({
+        message: 'Error recalling message',
+        error: error.message,
+      });
       return { status: 'error', message: error.message };
     }
   }
-
-  // @SubscribeMessage('delete')
-  // async handleDeleteMessage(
-  //   @MessageBody() data: { messageId: string; groupId: string; userId: string },
-  //   @ConnectedSocket() client: Socket,
-  // ) {
-  //   try {
-  //     const { messageId, userId } = data;
-  //     if (!messageId || !userId) {
-  //       throw new Error('messageId và userId là bắt buộc');
-  //     }
-
-  //     this.logger.debug(`Nhận được sự kiện xóa tin nhắn: ${messageId} bởi người dùng ${userId}`);
-
-  //     // Không cần emit gì đến các người dùng khác vì đây là xóa cục bộ
-  //     // Chỉ thông báo cho người dùng đã xóa
-  //     client.emit('messageDeleted', {
-  //       messageId,
-  //       userId,
-  //     });
-
-  //     return { status: 'success' };
-  //   } catch (error) {
-  //     this.logger.error(`Lỗi khi xử lý xóa tin nhắn: ${error.message}`);
-  //     return { status: 'error', message: error.message };
-  //   }
-  // }
 
   @SubscribeMessage('forward')
   async handleForwardMessage(
@@ -695,76 +300,241 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   ) {
     try {
       const { messageId, targetGroupId, senderId } = data;
-      if (!messageId || !targetGroupId || !senderId) {
-        throw new Error('messageId, targetGroupId và senderId là bắt buộc');
-      }
+      if (!messageId || !targetGroupId || !senderId)
+        throw new Error('messageId, targetGroupId and senderId are required');
 
-      this.logger.debug(
-        `Nhận được sự kiện chuyển tiếp tin nhắn: ${messageId} đến group ${targetGroupId}`,
-      );
-
-      // Lấy thông tin tin nhắn đã được chuyển tiếp
+      await this.validateGroupMembership(senderId, targetGroupId);
       const messageResult = await this.chatService.getMessageById(messageId);
-      if (!messageResult) {
-        throw new Error('Tin nhắn không tồn tại');
-      }
+      if (!messageResult) throw new Error('Message not found');
 
-      // Get active readers (users currently viewing this group)
       const activeReaders = await this.getActiveViewers(targetGroupId);
-
-      // Thông báo cho tất cả người dùng trong group đích về tin nhắn mới
-      this.server.to(targetGroupId).emit('newMessage', {
+      const messageData = {
         ...messageResult,
         readBy: messageResult.readBy?.map((r) => r.userId) || [],
         isForwarded: true,
         originalMessageId: messageId,
-      });
+      };
 
-      // Cập nhật unread counts cho những người dùng không đang xem group
-      // Get all participants for this group
-      const participants = await this.groupService.getGroupById(targetGroupId);
+      this.server.to(targetGroupId).emit('newMessage', messageData);
 
-      // For participants not actively viewing the group but online, send unread notification
-      participants.forEach(async (participantId) => {
-        // Skip if user is actively viewing the group
-        if (activeReaders.includes(participantId)) {
-          return;
-        }
+      const participants = await this.getCachedGroupParticipants(targetGroupId);
+      const notificationPromises = participants.map(async (participantId) => {
+        if (activeReaders.includes(participantId)) return;
 
-        // If user is online but not viewing this group, send notification
         const userSockets = await this.redisService.smembers(
           `${this.PROFILE_CONNECTIONS}${participantId}`,
         );
-
         if (userSockets.length > 0) {
+          const unreadCounts =
+            await this.chatService.getUnreadMessageCountsByGroups(
+              participantId,
+            );
           userSockets.forEach((socketId) => {
-            this.server.to(socketId).emit('newNotification', {
+            this.server.to(socketId).emit('messageUpdate', {
               type: 'NEW_MESSAGE',
               groupId: targetGroupId,
-              message: {
-                ...messageResult,
-                readBy: messageResult.readBy?.map((r) => r.userId) || [],
-                isForwarded: true,
-                originalMessageId: messageId,
-              },
+              message: messageData,
+              unreadCounts,
             });
-          });
-
-          // Also update unread counts for these users
-          userSockets.forEach(async (socketId) => {
-            const unreadCounts =
-              await this.chatService.getUnreadMessageCountsByGroups(
-                participantId,
-              );
-            this.server.to(socketId).emit('unreadCountUpdated', unreadCounts);
           });
         }
       });
 
+      await Promise.all(notificationPromises);
+      this.logger.log({
+        message: 'Message forwarded',
+        messageId,
+        targetGroupId,
+        senderId,
+      });
       return { status: 'success' };
     } catch (error) {
-      this.logger.error(`Lỗi khi xử lý chuyển tiếp tin nhắn: ${error.message}`);
+      this.logger.error({
+        message: 'Error forwarding message',
+        error: error.message,
+      });
       return { status: 'error', message: error.message };
     }
+  }
+
+  @SubscribeMessage('getActiveUsers')
+  async handleGetActiveUsers(
+    @MessageBody() data: { groupId: string },
+    @ConnectedSocket() client: Socket,
+  ) {
+    try {
+      const { groupId } = data;
+      if (!groupId) throw new Error('groupId is required');
+
+      const activeUsers = await this.getActiveViewers(groupId);
+      this.logger.log({
+        message: 'Fetched active users',
+        groupId,
+        activeUsers,
+      });
+      return { status: 'success', activeUsers };
+    } catch (error) {
+      this.logger.error({
+        message: 'Error getting active users',
+        error: error.message,
+      });
+      return { status: 'error', message: error.message };
+    }
+  }
+
+  @SubscribeMessage('markAsRead')
+  async handleMarkAsRead(
+    @MessageBody() data: { profileId: string; groupId: string },
+    @ConnectedSocket() client: Socket,
+  ) {
+    try {
+      const { profileId, groupId } = data;
+      if (!profileId || !groupId)
+        throw new Error('profileId and groupId are required');
+
+      const markResult = await this.chatService.markMessagesAsRead(
+        profileId,
+        groupId,
+      );
+      if (markResult.count > 0) {
+        this.server.to(groupId).emit('messagesRead', {
+          profileId,
+          groupId,
+          messageIds: markResult.messageIds,
+        });
+        const unreadCounts =
+          await this.chatService.getUnreadMessageCountsByGroups(profileId);
+        client.emit('unreadCountUpdated', unreadCounts);
+      }
+
+      this.logger.log({
+        message: 'Messages marked as read',
+        profileId,
+        groupId,
+        count: markResult.count,
+      });
+      return { status: 'success', count: markResult.count };
+    } catch (error) {
+      this.logger.error({
+        message: 'Error marking messages as read',
+        error: error.message,
+      });
+      return { status: 'error', message: error.message };
+    }
+  }
+
+  @SubscribeMessage('getUnreadCounts')
+  async handleGetUnreadCounts(
+    @MessageBody() data: { profileId: string },
+    @ConnectedSocket() client: Socket,
+  ) {
+    try {
+      const { profileId } = data;
+      if (!profileId) throw new Error('profileId is required');
+
+      const unreadCounts =
+        await this.chatService.getUnreadMessageCountsByGroups(profileId);
+      this.logger.log({
+        message: 'Fetched unread counts',
+        profileId,
+        unreadCounts,
+      });
+      return { status: 'success', unreadCounts };
+    } catch (error) {
+      this.logger.error({
+        message: 'Error getting unread counts',
+        error: error.message,
+      });
+      return { status: 'error', message: error.message };
+    }
+  }
+
+  private async broadcastUserStatus(profileId: string, isOnline: boolean) {
+    try {
+      const groups = await this.groupService.getGroupsByProfileId(profileId);
+      for (const group of groups) {
+        const viewers = await this.getActiveViewers(group.id);
+        const isActive = viewers.includes(profileId);
+        this.server.to(group.id).emit('userStatusUpdate', {
+          profileId,
+          isOnline,
+          isActive,
+        });
+      }
+    } catch (error) {
+      this.logger.error({
+        message: 'Error broadcasting user status',
+        error: error.message,
+      });
+    }
+  }
+
+  private async validateGroupMembership(profileId: string, groupId: string) {
+    const isMember = await this.groupService.isGroupMember(profileId, groupId);
+    if (!isMember) {
+      throw new Error('You are not a member of this group');
+    }
+  }
+
+  private async handlePreviousGroup(
+    client: Socket,
+    profileId: string,
+    groupId: string,
+  ) {
+    const previousGroup = await this.redisService.get<string>(
+      `${this.SOCKET_TO_ACTIVE_GROUP}${client.id}`,
+    );
+    if (previousGroup && previousGroup !== groupId) {
+      await this.leaveGroup(client, profileId, previousGroup);
+    }
+  }
+
+  private async leaveGroup(client: Socket, profileId: string, groupId: string) {
+    const pipeline = this.redisService.multi();
+    pipeline.srem(`${this.ACTIVE_GROUP_VIEWERS}${groupId}`, profileId);
+    pipeline.del(`${this.SOCKET_TO_ACTIVE_GROUP}${client.id}`);
+    await pipeline.exec();
+
+    client.leave(groupId);
+    const remainingViewers = await this.redisService.smembers(
+      `${this.ACTIVE_GROUP_VIEWERS}${groupId}`,
+    );
+    if (remainingViewers.length === 0) {
+      await this.redisService.del(`${this.ACTIVE_GROUP_VIEWERS}${groupId}`);
+    }
+
+    this.server.to(groupId).emit('userStatusUpdate', {
+      profileId,
+      isOnline: await this.isProfileOnline(profileId),
+      isActive: false,
+      groupId,
+    });
+  }
+
+  private async isProfileOnline(profileId: string): Promise<boolean> {
+    const count = await this.redisService.scard(
+      `${this.PROFILE_CONNECTIONS}${profileId}`,
+    );
+    return count > 0;
+  }
+
+  private async getActiveViewers(groupId: string): Promise<string[]> {
+    return (
+      (await this.redisService.smembers(
+        `${this.ACTIVE_GROUP_VIEWERS}${groupId}`,
+      )) || []
+    );
+  }
+
+  private async getCachedGroupParticipants(groupId: string): Promise<string[]> {
+    const cacheKey = `group:participants:${groupId}`;
+    let participants = await this.redisService.get<string>(cacheKey);
+    if (!participants) {
+      participants = JSON.stringify(
+        await this.groupService.getGroupById(groupId),
+      );
+      await this.redisService.setex(cacheKey, participants, 3600);
+    }
+    return JSON.parse(participants);
   }
 }
