@@ -17,18 +17,86 @@ export class ChatService {
     private readonly cloudinaryService: CloudinaryService,
   ) {}
 
+  private async uploadFileByType(
+    file: Express.Multer.File,
+    type: MessageType,
+  ): Promise<{ url: string; fileSize: number; originalName: string }> {
+    // Fix Vietnamese filename encoding issues
+    let originalName = file.originalname;
+
+    // Try to normalize the filename if it's incorrectly encoded
+    try {
+      // Check if filename has incorrect encoding (like "NhÃ³m" instead of "Nhóm")
+      if (/Ã/.test(originalName)) {
+        // Try to decode and re-normalize
+        const decodedName = Buffer.from(originalName, 'latin1').toString(
+          'utf8',
+        );
+        this.logger.debug(`Fixed encoding: ${originalName} → ${decodedName}`);
+        originalName = decodedName;
+      }
+    } catch (e) {
+      this.logger.warn(`Error normalizing filename: ${e.message}`);
+      // Keep original if error occurs
+    }
+
+    this.logger.debug(
+      `Uploading file: ${originalName}, type: ${type}, size: ${file.size}`,
+    );
+
+    try {
+      let fileResult: { url: string; fileSize: number; originalName: string };
+
+      switch (type) {
+        case MessageType.IMAGE:
+          fileResult = await this.cloudinaryService.uploadBufferToCloudinary(
+            file.buffer,
+            originalName,
+            'chat-images',
+          );
+          break;
+
+        case MessageType.VIDEO:
+          fileResult =
+            await this.cloudinaryService.uploadVideoBufferToCloudinary(
+              file.buffer,
+              originalName,
+              'chat-videos',
+            );
+          break;
+
+        case MessageType.RAW:
+          fileResult = await this.cloudinaryService.uploadRawFileToCloudinary(
+            file.buffer,
+            originalName,
+            'chat-files',
+          );
+          break;
+
+        default:
+          throw new Error(`Unsupported file type: ${type}`);
+      }
+
+      this.logger.debug(`File uploaded successfully. URL: ${fileResult.url}`);
+      return fileResult;
+    } catch (error) {
+      this.logger.error(`Error uploading file: ${error.message}`, error.stack);
+      throw error;
+    }
+  }
+
   async sendMessage(
     senderId: string,
     groupId: string,
-    message: string,
-    type: MessageType = MessageType.TEXT,
-    activeReaders: string[] = [],
+    content: string,
+    type: MessageType,
+    readBy: string[] = [],
     file?: Express.Multer.File,
-  ) {
+  ): Promise<any> {
     this.logger.log(
-      `Sending message from ${senderId} to group ${groupId}: ${message} with type ${type}`,
+      `Sending message from ${senderId} to group ${groupId}: ${content} with type ${type}`,
     );
-    this.logger.debug(`Active readers: ${activeReaders.join(', ') || 'none'}`);
+    this.logger.debug(`Active readers: ${readBy.join(', ') || 'none'}`);
 
     // Kiểm tra người dùng có trong group không trước khi gửi tin nhắn
     const participant = await this.prisma.participant.findUnique({
@@ -47,35 +115,29 @@ export class ChatService {
       );
     }
 
-    let imageUrl: string | undefined;
-    let videoUrl: string | undefined;
+    let fileUrl: string = '';
+    let imageUrl: string = '';
+    let videoUrl: string = '';
+    let fileSize: number = 0;
+    let fileName: string = '';
 
+    // Upload file if present
     if (file) {
-      try {
-        const filename = `message_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
-        const folder =
-          type === MessageType.IMAGE ? 'chat-images' : 'chat-videos';
+      this.logger.debug(`Processing file upload for message type: ${type}`);
 
-        this.logger.debug(`Uploading file: ${filename} to folder ${folder}`);
+      const fileResult = await this.uploadFileByType(file, type);
+      fileUrl = fileResult.url;
+      fileSize = fileResult.fileSize;
+      fileName = fileResult.originalName;
 
-        const fileUrl = await this.cloudinaryService.uploadBufferToCloudinary(
-          file.buffer,
-          filename,
-          folder,
-        );
-
-        if (type === MessageType.IMAGE) {
+      // Set the appropriate URL based on type
+      switch (type) {
+        case MessageType.IMAGE:
           imageUrl = fileUrl;
-          this.logger.debug(`Image uploaded: ${imageUrl}`);
-        } else if (type === MessageType.VIDEO) {
+          break;
+        case MessageType.VIDEO:
           videoUrl = fileUrl;
-          this.logger.debug(`Video uploaded: ${videoUrl}`);
-        }
-
-        this.logger.debug(`File uploaded successfully, URL: ${fileUrl}`);
-      } catch (error) {
-        this.logger.error(`Error uploading file: ${error.message}`);
-        throw error;
+          break;
       }
     }
 
@@ -83,38 +145,43 @@ export class ChatService {
     const readByData = [
       { userId: senderId },
       // Add other active readers
-      ...activeReaders
-        .filter((id) => id !== senderId)
-        .map((userId) => ({ userId })),
+      ...readBy.filter((id) => id !== senderId).map((userId) => ({ userId })),
     ];
 
     this.logger.debug(
       `Creating message with read receipts for: ${readByData.map((item) => item.userId).join(', ')}`,
     );
 
-    const chat = await this.prisma.message.create({
-      data: {
-        senderId,
-        groupId,
-        type,
-        content: message,
-        ...(imageUrl && { imageUrl }),
-        ...(videoUrl && { videoUrl }),
-        // Create read receipts for active users in the group
-        readBy: {
-          create: readByData,
-        },
+    // Add file metadata to the message
+    const messageData = {
+      senderId,
+      groupId,
+      type,
+      content,
+      imageUrl,
+      videoUrl,
+      fileUrl: type === MessageType.RAW ? fileUrl : null,
+      // Store file metadata if applicable
+      fileSize: file ? fileSize : null,
+      fileName: file ? fileName : null,
+      // Create read receipts for active users in the group
+      readBy: {
+        create: readByData,
       },
+    };
+
+    const message = await this.prisma.message.create({
+      data: messageData,
       include: {
         readBy: true,
         sender: true,
       },
     });
 
-    this.logger.debug(`Message created with ID: ${chat.id}`);
-    this.logger.debug(`Read receipts created: ${chat.readBy.length}`);
+    this.logger.debug(`Message created with ID: ${message.id}`);
+    this.logger.debug(`Read receipts created: ${message.readBy.length}`);
 
-    return chat;
+    return message;
   }
 
   async markMessagesAsRead(userId: string, groupId: string) {
@@ -237,7 +304,9 @@ export class ChatService {
       };
     });
 
-    const results = await Promise.all(unreadCountsPromises);
+    const results = await Promise.all<{ groupId: string; unreadCount: number }>(
+      unreadCountsPromises,
+    );
     this.logger.debug(`Unread counts by group: ${JSON.stringify(results)}`);
 
     return results;
@@ -289,19 +358,75 @@ export class ChatService {
     }
   }
 
-  async uploadSticker(file: Express.Multer.File): Promise<string> {
+  async getMessagesPaginated(
+    groupId: string,
+    userId: string,
+    limit: number = 10,
+    cursor?: string,
+  ) {
+    this.logger.debug(
+      `Fetching paginated messages for group ${groupId}, limit: ${limit}, cursor: ${cursor || 'none'}`,
+    );
+
     try {
-      const filename = `sticker_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
-      const stickerUrl = await this.cloudinaryService.uploadBufferToCloudinary(
-        file.buffer,
-        filename,
-        'stickers',
+      const queryOptions: any = {
+        where: {
+          groupId,
+          deletedBy: {
+            none: {
+              userId,
+            },
+          },
+        },
+        orderBy: {
+          createdAt: 'desc',
+        },
+        take: limit,
+        include: {
+          readBy: true,
+          sender: {
+            select: {
+              id: true,
+              name: true,
+              avatar: true,
+            },
+          },
+        },
+      };
+
+      // Add cursor condition if provided
+      if (cursor) {
+        queryOptions.cursor = {
+          id: cursor,
+        };
+        queryOptions.skip = 1; // Skip the cursor message
+      }
+
+      const messages = await this.prisma.message.findMany(queryOptions);
+
+      // Type assertion to help TypeScript understand that messages have readBy property
+      const formattedMessages = messages.map((message: any) => ({
+        ...message,
+        readBy: message.readBy.map((read) => read.userId),
+      }));
+
+      // Get the next cursor
+      const nextCursor =
+        messages.length === limit ? messages[messages.length - 1].id : null;
+
+      this.logger.debug(
+        `Retrieved ${messages.length} messages for group ${groupId}, nextCursor: ${nextCursor || 'none'}`,
       );
 
-      this.logger.debug(`Sticker uploaded successfully, URL: ${stickerUrl}`);
-      return stickerUrl;
+      return {
+        messages: formattedMessages.reverse(), // Return in chronological order
+        nextCursor,
+        hasMore: messages.length === limit,
+      };
     } catch (error) {
-      this.logger.error(`Error uploading sticker: ${error.message}`);
+      this.logger.error(
+        `Error fetching paginated messages for group ${groupId}: ${error.message}`,
+      );
       throw error;
     }
   }
@@ -545,7 +670,7 @@ export class ChatService {
           content: originalMessage.content,
           imageUrl: originalMessage.imageUrl,
           videoUrl: originalMessage.videoUrl,
-          stickerUrl: originalMessage.stickerUrl,
+          fileUrl: originalMessage.fileUrl,
           forwardedFrom: messageId,
           forwardedAt: new Date(),
           readBy: {

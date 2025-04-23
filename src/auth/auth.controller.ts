@@ -248,13 +248,18 @@ export class AuthController {
   ) {
     try {
       const accessToken = req.headers['authorization']?.replace('Bearer ', '');
+      // Lấy cả refresh token từ body request nếu có
+      const refreshToken = (req.body as any)?.refresh_token;
+
       if (!accessToken) {
         throw new Error('Access token not provided');
       }
+
       await this.authService.logout(
         accessToken,
         deviceInfo.ip,
         deviceInfo.deviceId,
+        refreshToken, // Pass refresh token if available
       );
 
       return res.status(HttpStatus.OK).send({

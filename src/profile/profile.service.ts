@@ -110,13 +110,20 @@ export class ProfileService {
         this.logger.debug(`Uploading new avatar with filename: ${filename}`);
 
         // Upload ảnh lên Cloudinary với tên cố định
-        avatarUrl = await this.cloudinaryService.uploadBufferToCloudinary(
-          file.buffer,
-          filename,
-          'profile-avatars',
-        );
+        const uploadResult =
+          await this.cloudinaryService.uploadBufferToCloudinary(
+            file.buffer,
+            filename,
+            'profile-avatars',
+          );
+
+        // Extract the URL from the result
+        avatarUrl = uploadResult.url;
 
         this.logger.debug(`Avatar uploaded successfully, URL: ${avatarUrl}`);
+        this.logger.debug(
+          `File size: ${uploadResult.fileSize} bytes, Original name: ${uploadResult.originalName}`,
+        );
       }
 
       // Cập nhật profile

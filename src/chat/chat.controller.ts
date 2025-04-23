@@ -4,9 +4,12 @@ import {
   Controller,
   Delete,
   ForbiddenException,
+  Get,
+  Logger,
   Param,
   Post,
   Put,
+  Query,
   Req,
   UploadedFile,
   UseGuards,
@@ -32,6 +35,8 @@ import { SendMessageDto } from './dto/send-message.dto';
 @ApiTags('Chat')
 @Controller('chat')
 export class ChatController {
+  private readonly logger = new Logger(ChatController.name);
+
   constructor(
     private readonly chatService: ChatService,
     private readonly groupService: GroupService,
@@ -79,20 +84,76 @@ export class ChatController {
   async sendMessage(
     @Body() data: SendMessageDto,
     @UploadedFile() file: Express.Multer.File,
+    @Req() req: any,
   ) {
     try {
-      const { groupId, message = '', type = MessageType.TEXT } = data;
-      const senderId = data.senderId;
+      let { groupId, message = '', type = MessageType.TEXT } = data;
+      this.logger.debug(`File received: ${file ? 'yes' : 'no'}`);
+
+      if (file) {
+        // Fix filename encoding if needed
+        let originalFilename = file.originalname;
+        try {
+          const decodedName = Buffer.from(originalFilename, 'latin1').toString(
+            'utf8',
+          );
+          this.logger.debug(
+            `Fixed filename encoding: ${originalFilename} → ${decodedName}`,
+          );
+          file.originalname = decodedName;
+        } catch (e) {
+          this.logger.warn(`Error fixing filename encoding: ${e.message}`);
+        }
+
+        this.logger.debug(
+          `File details - filename: ${file.originalname}, mimetype: ${file.mimetype}, size: ${file.size} bytes`,
+        );
+      }
+
+      // Get the sender's profile from account
+      const accountId = req.account.id;
+      this.logger.debug(`Sender accountId: ${accountId}`);
+
+      const profile =
+        await this.groupService.getProfileFromAccountId(accountId);
+      const senderId = profile.id;
+      this.logger.debug(`Resolved profile ID: ${senderId}`);
+
+      // Determine message type based on file if present
+      if (file) {
+        const mimeType = file.mimetype;
+        this.logger.debug(
+          `Processing file with mimetype: ${mimeType}, original filename: ${file.originalname}`,
+        );
+
+        if (mimeType.startsWith('image/')) {
+          type = MessageType.IMAGE;
+          this.logger.debug('Setting message type to IMAGE');
+        } else if (mimeType.startsWith('video/')) {
+          type = MessageType.VIDEO;
+          this.logger.debug('Setting message type to VIDEO');
+        } else {
+          type = MessageType.RAW;
+          this.logger.debug('Setting message type to RAW');
+        }
+      }
 
       // Kiểm tra xem người dùng có phải là thành viên của nhóm chat không
+      this.logger.debug(
+        `Checking if user ${senderId} is a member of group ${groupId}`,
+      );
       const isMember = await this.groupService.isGroupMember(senderId, groupId);
       if (!isMember) {
+        this.logger.warn(
+          `User ${senderId} is not a member of group ${groupId}`,
+        );
         throw new ForbiddenException(
           'Bạn không phải là thành viên của nhóm chat này',
         );
       }
 
-      // Gọi service để lưu tin nhắn nhưng không gửi socket notification
+      // Gọi service để lưu tin nhắn
+      this.logger.debug(`Sending message to chatService with type: ${type}`);
       const messageResult = await this.chatService.sendMessage(
         senderId,
         groupId,
@@ -102,6 +163,13 @@ export class ChatController {
         file,
       );
 
+      this.logger.debug(`Message sent successfully, id: ${messageResult.id}`);
+      if (file) {
+        this.logger.debug(
+          `Message file URL: ${messageResult.fileUrl || 'NOT SET'}`,
+        );
+      }
+
       return {
         status: 'success',
         statusCode: 200,
@@ -109,10 +177,11 @@ export class ChatController {
           messageId: messageResult.id,
           groupId: messageResult.groupId,
           senderId: messageResult.senderId,
-          // message: messageResult,
+          message: messageResult,
         },
       };
     } catch (error) {
+      this.logger.error(`Error sending message: ${error.message}`, error.stack);
       return {
         status: 'error',
         statusCode: error.status || 400,
@@ -120,50 +189,6 @@ export class ChatController {
       };
     }
   }
-
-  // @Post('sticker')
-  // @UseGuards(JwtAuthGuard)
-  // @UseInterceptors(FileInterceptor('file'))
-  // @ApiOperation({ summary: 'Tải lên sticker mới' })
-  // @ApiConsumes('multipart/form-data')
-  // @ApiBody({ type: UploadStickerDto })
-  // @ApiResponse({
-  //   status: 200,
-  //   description: 'Sticker đã được tải lên thành công',
-  //   type: ApiResponseDto,
-  //   schema: {
-  //     properties: {
-  //       status: { type: 'string', example: 'success' },
-  //       statusCode: { type: 'number', example: 200 },
-  //       data: {
-  //         type: 'object',
-  //         properties: {
-  //           stickerUrl: {
-  //             type: 'string',
-  //             example:
-  //               'https://storage.example.com/stickers/123e4567-e89b-12d3-a456-426614174000.png',
-  //           },
-  //         },
-  //       },
-  //     },
-  //   },
-  // })
-  // @ApiResponse({ status: 400, description: 'Không có file nào được tải lên' })
-  // async uploadSticker(@UploadedFile() file: Express.Multer.File) {
-  //   if (!file) {
-  //     return {
-  //       status: 'error',
-  //       message: 'No file uploaded',
-  //     };
-  //   }
-
-  //   const stickerUrl = await this.chatService.uploadSticker(file);
-
-  //   return {
-  //     status: 'success',
-  //     data: { stickerUrl },
-  //   };
-  // }
 
   @Put('recall/:messageId')
   @UseGuards(JwtAuthGuard)
@@ -303,7 +328,6 @@ export class ChatController {
         await this.groupService.getProfileFromAccountId(accountId);
       const { messageId, targetGroupId } = data;
 
-      // Lấy thông tin tin nhắn
       const message = await this.chatService.getMessageById(messageId);
       if (!message) {
         throw new BadRequestException('Tin nhắn không tồn tại');
@@ -347,6 +371,76 @@ export class ChatController {
         },
       };
     } catch (error) {
+      return {
+        status: 'error',
+        statusCode: error.status || 400,
+        message: error.message,
+      };
+    }
+  }
+
+  @Get('messages/:groupId')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Lấy tin nhắn theo trang của nhóm chat' })
+  @ApiParam({ name: 'groupId', description: 'ID của nhóm chat' })
+  @ApiResponse({
+    status: 200,
+    description: 'Danh sách tin nhắn của nhóm chat',
+    schema: {
+      properties: {
+        status: { type: 'string', example: 'success' },
+        statusCode: { type: 'number', example: 200 },
+        data: {
+          type: 'object',
+          properties: {
+            messages: { type: 'array', items: { type: 'object' } },
+            nextCursor: { type: 'string', nullable: true },
+            hasMore: { type: 'boolean' },
+          },
+        },
+      },
+    },
+  })
+  @ApiResponse({ status: 400, description: 'Dữ liệu không hợp lệ' })
+  @ApiResponse({ status: 403, description: 'Không có quyền truy cập' })
+  async getMessages(
+    @Param('groupId') groupId: string,
+    @Req() req: any,
+    @Query('limit') limit: string = '10',
+    @Query('cursor') cursor?: string,
+  ) {
+    try {
+      const accountId = req.account.id;
+      const profile =
+        await this.groupService.getProfileFromAccountId(accountId);
+
+      // Kiểm tra người dùng có phải thành viên của nhóm không
+      const isMember = await this.groupService.isGroupMember(
+        profile.id,
+        groupId,
+      );
+      if (!isMember) {
+        throw new ForbiddenException(
+          'Bạn không phải là thành viên của nhóm chat này',
+        );
+      }
+
+      const parsedLimit = Math.min(parseInt(limit) || 10, 50);
+
+      const messageData = await this.chatService.getMessagesPaginated(
+        groupId,
+        profile.id,
+        parsedLimit,
+        cursor,
+      );
+
+      return {
+        status: 'success',
+        statusCode: 200,
+        data: messageData,
+      };
+    } catch (error) {
+      this.logger.error(`Error getting messages: ${error.message}`);
       return {
         status: 'error',
         statusCode: error.status || 400,
