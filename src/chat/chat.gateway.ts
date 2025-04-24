@@ -528,13 +528,13 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   private async getCachedGroupParticipants(groupId: string): Promise<string[]> {
     const cacheKey = `group:participants:${groupId}`;
-    let participants = await this.redisService.get<string>(cacheKey);
+    let participants = await this.redisService.get<string[]>(cacheKey);
+
     if (!participants) {
-      participants = JSON.stringify(
-        await this.groupService.getGroupById(groupId),
-      );
+      const resParticipants = await this.groupService.getGroupById(groupId);
+      participants = resParticipants;
       await this.redisService.setex(cacheKey, participants, 3600);
     }
-    return JSON.parse(participants);
+    return participants;
   }
 }
