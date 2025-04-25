@@ -24,6 +24,11 @@ enum GroupRole {
   MEMBER
 }
 
+enum Gender {
+  M
+  F
+}
+
 model Account {
   id        String   @id @default(auto()) @map("_id") @db.ObjectId
   email     String   @unique
@@ -43,6 +48,7 @@ model Profile {
   avatar    String?
   bio       String?
   phone     String?
+  gender    Gender?   @default(M)
   birthday  DateTime?
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt

@@ -4,6 +4,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { Gender } from '@prisma/client';
 import { CloudinaryService } from 'src/config/cloudinary/cloudinary.service';
 import { PrismaService } from 'src/config/prisma/prisma.service';
 import { UpdateProfileDTO } from './dto/update.profile.dto';
@@ -43,6 +44,7 @@ export class ProfileService {
       avatar: profile.avatar || '',
       bio: profile.bio || '',
       phone: profile.phone || '',
+      gender: profile.gender || Gender.M,
       birthday: profile.birthday || null,
       email: account.email || '',
       username: account.username || '',
@@ -136,10 +138,12 @@ export class ProfileService {
           name: updateProfileDTO.name,
           bio: updateProfileDTO.bio,
           phone: updateProfileDTO.phone,
+          gender: updateProfileDTO.gender,
           avatar: avatarUrl, // Sử dụng URL mới nếu đã upload ảnh
           birthday: updateProfileDTO.birthday
             ? new Date(updateProfileDTO.birthday)
             : undefined,
+
           isSetup: true,
         },
       });
@@ -152,6 +156,7 @@ export class ProfileService {
         name: updatedProfile.name || '',
         avatar: updatedProfile.avatar || '',
         bio: updatedProfile.bio || '',
+        gender: updateProfileDTO.gender,
         phone: updatedProfile.phone || '',
         birthday: updatedProfile.birthday || null,
       };
@@ -186,9 +191,9 @@ export class ProfileService {
         avatar: account.profile?.avatar || '',
         bio: account.profile?.bio || '',
         phone: account.profile?.phone || '',
+        gender: account.profile?.gender || Gender.M,
         birthday: account.profile?.birthday || null,
       },
     };
   }
-
 }
