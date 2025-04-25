@@ -1,15 +1,16 @@
 import {
-    Injectable,
-    Logger,
-    NotFoundException,
-    UnauthorizedException,
+  Injectable,
+  Logger,
+  NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { Account } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from 'src/config/prisma/prisma.service';
+import { RedisService } from 'src/config/redis/redis.service';
 import {
-    AccountResponseDto,
-    AccountWithProfileResponseDto,
+  AccountResponseDto,
+  AccountWithProfileResponseDto,
 } from './dto/account.response.dto';
 import { UpdatePasswordDTO } from './dto/update.account.dto';
 
@@ -17,7 +18,10 @@ import { UpdatePasswordDTO } from './dto/update.account.dto';
 export class AccountService {
   private readonly logger = new Logger(AccountService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private readonly redisService: RedisService,
+  ) {}
 
   async findAccountById(id: string): Promise<AccountWithProfileResponseDto> {
     const account = await this.prisma.account.findUnique({
@@ -48,43 +52,53 @@ export class AccountService {
     return this.mapToAccountWithProfileDTO(account);
   }
 
-  async updateAccount(
+  async changPassword(
     id: string,
     updatePassword: UpdatePasswordDTO,
   ): Promise<AccountResponseDto> {
-    const account = await this.prisma.account.findUnique({
-      where: { id },
-    });
+    try {
+      const account = await this.prisma.account.findUnique({
+        where: { id },
+      });
 
-    if (!account) {
-      throw new NotFoundException(`Không tìm thấy tài khoản với ID: ${id}`);
+      if (!account) {
+        throw new NotFoundException(`Không tìm thấy tài khoản với ID: ${id}`);
+      }
+
+      const isPasswordValid = await bcrypt.compare(
+        updatePassword.currentPassword,
+        account.password,
+      );
+
+      if (!isPasswordValid) {
+        throw new UnauthorizedException('Mật khẩu hiện tại không chính xác');
+      }
+
+      // Cập nhật thông tin tài khoản
+      const updateData: any = {};
+
+      // Cập nhật mật khẩu nếu được cung cấp
+      if (updatePassword.newPassword) {
+        const hashedPassword = await bcrypt.hash(
+          updatePassword.newPassword,
+          10,
+        );
+        updateData.password = hashedPassword;
+      }
+
+      // Thực hiện cập nhật
+      const updatedAccount = await this.prisma.account.update({
+        where: { id },
+        data: updateData,
+      });
+
+      await this.redisService.del(`user:${account.id}`);
+
+      return this.mapToAccountDto(updatedAccount);
+    } catch (error) {
+      this.logger.error(`Failed to update password: ${error.message}`);
+      throw new UnauthorizedException('Cập nhật mật khẩu thất bại');
     }
-
-    const isPasswordValid = await bcrypt.compare(
-      updatePassword.currentPassword,
-      account.password,
-    );
-
-    if (!isPasswordValid) {
-      throw new UnauthorizedException('Mật khẩu hiện tại không chính xác');
-    }
-
-    // Cập nhật thông tin tài khoản
-    const updateData: any = {};
-
-    // Cập nhật mật khẩu nếu được cung cấp
-    if (updatePassword.newPassword) {
-      const hashedPassword = await bcrypt.hash(updatePassword.newPassword, 10);
-      updateData.password = hashedPassword;
-    }
-
-    // Thực hiện cập nhật
-    const updatedAccount = await this.prisma.account.update({
-      where: { id },
-      data: updateData,
-    });
-
-    return this.mapToAccountDto(updatedAccount);
   }
 
   // async deleteAccount(id: string): Promise<void> {

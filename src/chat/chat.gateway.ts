@@ -29,6 +29,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private readonly ACTIVE_GROUP_VIEWERS = 'group:viewers:';
   private readonly SOCKET_TO_ACTIVE_GROUP = 'socket:group:';
 
+  // Token expiration time in seconds (1 day)
+  private readonly TOKEN_EXPIRATION = 86400;
+
   constructor(
     private readonly groupService: GroupService,
     private readonly chatService: ChatService,
@@ -51,40 +54,59 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       if (!profileId) return;
 
-      const pipeline = this.redisService.multi();
       const connectionsKey = `${this.PROFILE_CONNECTIONS}${profileId}`;
+      const pipeline = this.redisService.multi();
+
+      // Remove socket from profile connections
       pipeline.srem(connectionsKey, client.id);
       pipeline.del(socketToProfileKey);
 
+      // Handle active group cleanup if socket was viewing a group
       if (activeGroupId) {
         const viewersKey = `${this.ACTIVE_GROUP_VIEWERS}${activeGroupId}`;
         pipeline.srem(viewersKey, profileId);
         pipeline.del(socketToGroupKey);
-      }
 
-      await pipeline.exec();
-
-      if (activeGroupId && profileId) {
-        const remainingViewers = await this.redisService.smembers(
-          `${this.ACTIVE_GROUP_VIEWERS}${activeGroupId}`,
-        );
-        if (remainingViewers.length === 0) {
-          await this.redisService.del(
-            `${this.ACTIVE_GROUP_VIEWERS}${activeGroupId}`,
-          );
-        }
+        // Notify group about user becoming inactive
+        client.leave(activeGroupId);
         this.server.to(activeGroupId).emit('userStatusUpdate', {
           profileId,
           isActive: false,
           groupId: activeGroupId,
+          isOnline: false, // Will be updated if user has other connections
         });
       }
 
+      await pipeline.exec();
+
+      // Check for remaining connections after the pipeline has executed
       const remainingConnections =
         await this.redisService.scard(connectionsKey);
+
       if (remainingConnections === 0) {
+        // If no connections left, clean up the connections set
         await this.redisService.del(connectionsKey);
         await this.broadcastUserStatus(profileId, false);
+      } else {
+        // User still has other active connections
+        if (activeGroupId) {
+          this.server.to(activeGroupId).emit('userStatusUpdate', {
+            profileId,
+            isActive: false,
+            groupId: activeGroupId,
+            isOnline: true,
+          });
+        }
+      }
+
+      // Check if there are remaining viewers in the group
+      if (activeGroupId) {
+        const viewersKey = `${this.ACTIVE_GROUP_VIEWERS}${activeGroupId}`;
+        const remainingViewers = await this.redisService.smembers(viewersKey);
+
+        if (remainingViewers.length === 0) {
+          await this.redisService.del(viewersKey);
+        }
       }
 
       this.logger.log({
@@ -96,6 +118,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       this.logger.error({
         message: 'Error handling disconnect',
         error: error.message,
+        stack: error.stack,
       });
     }
   }
@@ -110,8 +133,18 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       if (!profileId) throw new Error('profileId is required');
 
       const pipeline = this.redisService.multi();
-      pipeline.set(`${this.SOCKET_TO_PROFILE}${client.id}`, profileId);
+      // Set expiration time for socket-to-profile mapping
+      pipeline.setex(
+        `${this.SOCKET_TO_PROFILE}${client.id}`,
+        this.TOKEN_EXPIRATION,
+        profileId,
+      );
       pipeline.sadd(`${this.PROFILE_CONNECTIONS}${profileId}`, client.id);
+      // Set expiration for the connections set
+      pipeline.expire(
+        `${this.PROFILE_CONNECTIONS}${profileId}`,
+        this.TOKEN_EXPIRATION,
+      );
       await pipeline.exec();
 
       await this.broadcastUserStatus(profileId, true);
@@ -148,8 +181,18 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       await this.handlePreviousGroup(client, profileId, groupId);
 
       const pipeline = this.redisService.multi();
-      pipeline.set(`${this.SOCKET_TO_ACTIVE_GROUP}${client.id}`, groupId);
+      // Set expiration time for socket-to-group mapping
+      pipeline.setex(
+        `${this.SOCKET_TO_ACTIVE_GROUP}${client.id}`,
+        this.TOKEN_EXPIRATION,
+        groupId,
+      );
       pipeline.sadd(`${this.ACTIVE_GROUP_VIEWERS}${groupId}`, profileId);
+      // Set expiration for the viewers set
+      pipeline.expire(
+        `${this.ACTIVE_GROUP_VIEWERS}${groupId}`,
+        this.TOKEN_EXPIRATION,
+      );
       await pipeline.exec();
 
       client.join(groupId);
@@ -243,7 +286,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
               participantId,
             );
           userSockets.forEach((socketId) => {
-            this.server.to(socketId).emit('messageUpdate', {
+            this.server.to(socketId).emit('notifyMessage', {
               type: 'NEW_MESSAGE',
               groupId,
               message: messageData,
@@ -533,7 +576,12 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (!participants) {
       const resParticipants = await this.groupService.getGroupById(groupId);
       participants = resParticipants;
-      await this.redisService.setex(cacheKey, participants, 3600);
+      // Set TTL on this cache key too
+      await this.redisService.setex(
+        cacheKey,
+        participants,
+        this.TOKEN_EXPIRATION,
+      );
     }
     return participants;
   }
