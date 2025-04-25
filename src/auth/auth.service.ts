@@ -404,9 +404,15 @@ export class AuthService {
     // Xóa key lưu token
     await Promise.all([
       this.redisService.del(`reset_token:${resetPasswordDto.token}`),
+      // Xóa toàn bộ hash chứa thông tin session của user này để buộc logout khỏi mọi thiết bị
+      this.redisService.del(`user:${account.id}`),
       // Có thể thêm nếu muốn reset liên tục
       // this.redisService.del(`reset_pending:${account.id}`),
     ]);
+
+    this.logger.debug(
+      `Đã đổi mật khẩu và xóa tất cả session của user ${account.id}`,
+    );
   }
 
   async resendOTP(email: string): Promise<{ email: string }> {

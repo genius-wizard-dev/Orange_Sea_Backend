@@ -9,8 +9,10 @@ import {
   WebSocketServer,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
+import { FcmService } from 'src/config/firebase/fcm.service';
 import { RedisService } from 'src/config/redis/redis.service';
 import { GroupService } from 'src/group/group.service';
+import { TokenService } from 'src/token/token.service';
 import { ChatService } from './chat.service';
 
 @WebSocketGateway({
@@ -29,10 +31,15 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private readonly ACTIVE_GROUP_VIEWERS = 'group:viewers:';
   private readonly SOCKET_TO_ACTIVE_GROUP = 'socket:group:';
 
+  // Token expiration time in seconds (1 day)
+  private readonly TOKEN_EXPIRATION = 86400;
+
   constructor(
     private readonly groupService: GroupService,
     private readonly chatService: ChatService,
     private readonly redisService: RedisService,
+    private readonly fcmService: FcmService,
+    private readonly tokenService: TokenService,
   ) {}
 
   handleConnection(client: Socket) {
@@ -51,40 +58,59 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       if (!profileId) return;
 
-      const pipeline = this.redisService.multi();
       const connectionsKey = `${this.PROFILE_CONNECTIONS}${profileId}`;
+      const pipeline = this.redisService.multi();
+
+      // Remove socket from profile connections
       pipeline.srem(connectionsKey, client.id);
       pipeline.del(socketToProfileKey);
 
+      // Handle active group cleanup if socket was viewing a group
       if (activeGroupId) {
         const viewersKey = `${this.ACTIVE_GROUP_VIEWERS}${activeGroupId}`;
         pipeline.srem(viewersKey, profileId);
         pipeline.del(socketToGroupKey);
-      }
 
-      await pipeline.exec();
-
-      if (activeGroupId && profileId) {
-        const remainingViewers = await this.redisService.smembers(
-          `${this.ACTIVE_GROUP_VIEWERS}${activeGroupId}`,
-        );
-        if (remainingViewers.length === 0) {
-          await this.redisService.del(
-            `${this.ACTIVE_GROUP_VIEWERS}${activeGroupId}`,
-          );
-        }
+        // Notify group about user becoming inactive
+        client.leave(activeGroupId);
         this.server.to(activeGroupId).emit('userStatusUpdate', {
           profileId,
           isActive: false,
           groupId: activeGroupId,
+          isOnline: false, // Will be updated if user has other connections
         });
       }
 
+      await pipeline.exec();
+
+      // Check for remaining connections after the pipeline has executed
       const remainingConnections =
         await this.redisService.scard(connectionsKey);
+
       if (remainingConnections === 0) {
+        // If no connections left, clean up the connections set
         await this.redisService.del(connectionsKey);
         await this.broadcastUserStatus(profileId, false);
+      } else {
+        // User still has other active connections
+        if (activeGroupId) {
+          this.server.to(activeGroupId).emit('userStatusUpdate', {
+            profileId,
+            isActive: false,
+            groupId: activeGroupId,
+            isOnline: true,
+          });
+        }
+      }
+
+      // Check if there are remaining viewers in the group
+      if (activeGroupId) {
+        const viewersKey = `${this.ACTIVE_GROUP_VIEWERS}${activeGroupId}`;
+        const remainingViewers = await this.redisService.smembers(viewersKey);
+
+        if (remainingViewers.length === 0) {
+          await this.redisService.del(viewersKey);
+        }
       }
 
       this.logger.log({
@@ -96,6 +122,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       this.logger.error({
         message: 'Error handling disconnect',
         error: error.message,
+        stack: error.stack,
       });
     }
   }
@@ -110,8 +137,18 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       if (!profileId) throw new Error('profileId is required');
 
       const pipeline = this.redisService.multi();
-      pipeline.set(`${this.SOCKET_TO_PROFILE}${client.id}`, profileId);
+      // Set expiration time for socket-to-profile mapping
+      pipeline.setex(
+        `${this.SOCKET_TO_PROFILE}${client.id}`,
+        this.TOKEN_EXPIRATION,
+        profileId,
+      );
       pipeline.sadd(`${this.PROFILE_CONNECTIONS}${profileId}`, client.id);
+      // Set expiration for the connections set
+      pipeline.expire(
+        `${this.PROFILE_CONNECTIONS}${profileId}`,
+        this.TOKEN_EXPIRATION,
+      );
       await pipeline.exec();
 
       await this.broadcastUserStatus(profileId, true);
@@ -148,8 +185,18 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       await this.handlePreviousGroup(client, profileId, groupId);
 
       const pipeline = this.redisService.multi();
-      pipeline.set(`${this.SOCKET_TO_ACTIVE_GROUP}${client.id}`, groupId);
+      // Set expiration time for socket-to-group mapping
+      pipeline.setex(
+        `${this.SOCKET_TO_ACTIVE_GROUP}${client.id}`,
+        this.TOKEN_EXPIRATION,
+        groupId,
+      );
       pipeline.sadd(`${this.ACTIVE_GROUP_VIEWERS}${groupId}`, profileId);
+      // Set expiration for the viewers set
+      pipeline.expire(
+        `${this.ACTIVE_GROUP_VIEWERS}${groupId}`,
+        this.TOKEN_EXPIRATION,
+      );
       await pipeline.exec();
 
       client.join(groupId);
@@ -231,25 +278,41 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       this.server.to(groupId).emit('newMessage', messageData);
 
+      // Get group info for notification content
+      const groupInfo = await this.groupService.getGroupInfo(groupId, senderId);
+
+      const senderName = messageData.sender.name || 'Someone';
+
       const notificationPromises = participants.map(async (participantId) => {
-        if (activeReaders.includes(participantId)) return;
+        if (participantId === senderId || activeReaders.includes(participantId))
+          return;
 
         const userSockets = await this.redisService.smembers(
           `${this.PROFILE_CONNECTIONS}${participantId}`,
         );
+
         if (userSockets.length > 0) {
+          // User is online but not viewing this group
           const unreadCounts =
             await this.chatService.getUnreadMessageCountsByGroups(
               participantId,
             );
           userSockets.forEach((socketId) => {
-            this.server.to(socketId).emit('messageUpdate', {
+            this.server.to(socketId).emit('notifyMessage', {
               type: 'NEW_MESSAGE',
               groupId,
               message: messageData,
               unreadCounts,
             });
           });
+        } else {
+          // await this.sendPushNotification(
+          //   participantId,
+          //   groupId,
+          //   messageData,
+          //   senderName,
+          //   'New message',
+          // );
         }
       });
 
@@ -267,6 +330,69 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         error: error.message,
       });
       return { status: 'error', message: error.message };
+    }
+  }
+
+  // Add this new method to handle FCM notifications
+  private async sendPushNotification(
+    userId: string,
+    groupId: string,
+    messageData: any,
+    senderName: string,
+    groupName: string,
+  ) {
+    try {
+      // Get all FCM tokens for this user
+      const fcmTokens = await this.tokenService.getAllFCMTokens(userId);
+
+      if (!fcmTokens.length) {
+        this.logger.debug(`No FCM tokens found for user ${userId}`);
+        return;
+      }
+
+      // Extract notification content
+      const notificationTitle = senderName;
+      let notificationBody = '';
+
+      // Format notification based on message type
+      if (messageData.type === 'TEXT') {
+        notificationBody = messageData.content;
+      } else if (messageData.type === 'IMAGE') {
+        notificationBody = '📷 Sent a photo';
+      } else if (messageData.type === 'VIDEO') {
+        notificationBody = '📷 Sent a video';
+      } else if (messageData.type === 'RAW') {
+        notificationBody = '📎 Sent a file';
+      } else {
+        notificationBody = 'Sent a message';
+      }
+
+      // Add group name to the notification
+      notificationBody = `${notificationBody} in ${groupName}`;
+
+      // Prepare data payload
+      const data = {
+        groupId,
+        messageId: messageData.id,
+        senderId: messageData.senderId,
+        messageType: messageData.type,
+        timestamp: messageData.createdAt.toString(),
+        notificationType: 'NEW_MESSAGE',
+      };
+
+      // Send to all user devices
+      for (const token of fcmTokens) {
+        await this.fcmService.sendNotificationToDevice(
+          token,
+          notificationTitle,
+          notificationBody,
+          data,
+        );
+      }
+    } catch (error) {
+      this.logger.error(
+        `Failed to send push notification to user ${userId}: ${error.message}`,
+      );
     }
   }
 
@@ -531,9 +657,14 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     let participants = await this.redisService.get<string[]>(cacheKey);
 
     if (!participants) {
-      const resParticipants = await this.groupService.getGroupById(groupId);
+      const resParticipants =
+        await this.groupService.getPaticipantsInGroup(groupId);
       participants = resParticipants;
-      await this.redisService.setex(cacheKey, participants, 3600);
+      await this.redisService.setex(
+        cacheKey,
+        participants,
+        this.TOKEN_EXPIRATION,
+      );
     }
     return participants;
   }

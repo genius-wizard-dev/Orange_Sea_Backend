@@ -80,7 +80,7 @@ export class AccountController {
         };
       }
 
-      await this.accountService.updateAccount(id, updatePassword);
+      await this.accountService.changPassword(id, updatePassword);
       return {
         status: 'success',
         message: 'Cập nhật mật khẩu thành công',

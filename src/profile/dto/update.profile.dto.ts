@@ -1,4 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { Gender } from '@prisma/client';
 import {
   IsDateString,
   IsOptional,
@@ -45,6 +46,15 @@ export class UpdateProfileDTO {
   @IsString()
   @IsOptional()
   bio?: string;
+
+  @ApiProperty({
+    description: 'Giới tính',
+    enum: Gender,
+    required: false,
+  })
+  @IsString()
+  @IsOptional()
+  gender?: Gender;
 
   @ApiProperty({
     description: 'URL ảnh đại diện',

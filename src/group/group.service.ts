@@ -401,7 +401,7 @@ export class GroupService {
     }
   }
 
-  async getGroupById(groupId: string) {
+  async getPaticipantsInGroup(groupId: string) {
     try {
       const group = await this.prismaService.group.findUnique({
         where: { id: groupId },
