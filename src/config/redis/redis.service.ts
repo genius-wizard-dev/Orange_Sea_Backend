@@ -11,7 +11,39 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(RedisService.name, { timestamp: true });
   private redisClient: Redis;
 
-  onModuleInit() {
+  // Static properties to ensure singleton behavior
+  private static instance: RedisService;
+  private static isConnected = false;
+  private static connectionPromise: Promise<void> | null = null;
+
+  constructor() {
+    // Ensure we only create one instance
+    if (RedisService.instance) {
+      return RedisService.instance;
+    }
+    RedisService.instance = this;
+  }
+
+  async onModuleInit() {
+    // If already connected or in the process of connecting, return
+    if (RedisService.isConnected) {
+      this.logger.debug('Redis client already connected, skipping connection');
+      return;
+    }
+
+    // If connection is in progress, wait for it
+    if (RedisService.connectionPromise) {
+      this.logger.debug('Redis connection in progress, waiting...');
+      await RedisService.connectionPromise;
+      return;
+    }
+
+    // Start connection process
+    RedisService.connectionPromise = this.connect();
+    await RedisService.connectionPromise;
+  }
+
+  private async connect(): Promise<void> {
     const redisUrl = process.env.REDIS_URL;
     if (!redisUrl) {
       throw new Error('REDIS_URL is not defined');
@@ -22,22 +54,33 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
       maxRetriesPerRequest: 3,
     });
 
-    this.redisClient.on('connect', () => {
-      this.logger.log({ message: 'Redis client connected' });
-    });
+    return new Promise<void>((resolve, reject) => {
+      this.redisClient.on('connect', () => {
+        RedisService.isConnected = true;
+        this.logger.log({ message: 'Redis client connected' });
+        resolve();
+      });
 
-    this.redisClient.on('error', (error) => {
-      this.logger.error({
-        message: 'Redis client error',
-        error: error.message,
+      this.redisClient.on('error', (error) => {
+        this.logger.error({
+          message: 'Redis client error',
+          error: error.message,
+        });
+        if (!RedisService.isConnected) {
+          reject(error);
+        }
       });
     });
   }
 
   async onModuleDestroy() {
     try {
-      await this.redisClient.quit();
-      this.logger.log({ message: 'Redis client disconnected' });
+      if (this.redisClient && RedisService.isConnected) {
+        await this.redisClient.quit();
+        RedisService.isConnected = false;
+        RedisService.connectionPromise = null;
+        this.logger.log({ message: 'Redis client disconnected' });
+      }
     } catch (error) {
       this.logger.error({
         message: 'Error disconnecting Redis client',
@@ -259,6 +302,36 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
         message: 'Error getting hash field',
         key,
         field,
+        error: error.message,
+      });
+      throw error;
+    }
+  }
+
+  async hgetall<T = any>(key: string): Promise<Record<string, T> | null> {
+    try {
+      const data = await this.redisClient.hgetall(key);
+      if (!data || Object.keys(data).length === 0) {
+        this.logger.debug({ message: 'Hash not found or empty', key });
+        return null;
+      }
+
+      // Deserialize all values in the hash
+      const result: Record<string, T> = {};
+      for (const field in data) {
+        result[field] = this.deserialize<T>(data[field]);
+      }
+
+      this.logger.debug({
+        message: 'Retrieved all hash fields',
+        key,
+        count: Object.keys(result).length,
+      });
+      return result;
+    } catch (error) {
+      this.logger.error({
+        message: 'Error getting all hash fields',
+        key,
         error: error.message,
       });
       throw error;

@@ -352,4 +352,55 @@ export class TokenService {
       return null;
     }
   }
+
+  async getFCMToken(
+    accountId: string,
+    deviceId: string,
+  ): Promise<string | null> {
+    try {
+      const userKey = `user:${accountId}`;
+      const deviceData: DeviceData | null =
+        await this.redisService.hget<DeviceData>(userKey, deviceId);
+
+      if (!deviceData) {
+        this.logger.debug(`Device ${deviceId} not found for user ${accountId}`);
+        return null;
+      }
+
+      return deviceData.fcmToken || null;
+    } catch (error) {
+      this.logger.error(`Failed to get FCM token: ${error.message}`);
+      return null;
+    }
+  }
+
+  async getAllFCMTokens(accountId: string): Promise<string[]> {
+    try {
+      const userKey = `user:${accountId}`;
+      const allDevices = await this.redisService.hgetall(userKey);
+
+      if (!allDevices) {
+        this.logger.debug(`No devices found for user ${accountId}`);
+        return [];
+      }
+
+      const fcmTokens = Object.values(allDevices)
+        .map((deviceDataStr) => {
+          try {
+            const deviceData: DeviceData = JSON.parse(deviceDataStr);
+            return deviceData.fcmToken;
+          } catch (e) {
+            return null;
+          }
+        })
+        .filter(
+          (token): token is string => token !== null && token !== undefined,
+        );
+
+      return fcmTokens;
+    } catch (error) {
+      this.logger.error(`Failed to get all FCM tokens: ${error.message}`);
+      return [];
+    }
+  }
 }
