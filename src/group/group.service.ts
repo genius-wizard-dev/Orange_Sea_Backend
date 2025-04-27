@@ -318,6 +318,18 @@ export class GroupService {
             },
             take: 1,
           },
+          participants: {
+            include: {
+
+              user: {
+                select: {
+                  id:true,
+                  name: true,
+                  avatar: true
+                }
+              }
+            }
+          }
         },
         orderBy: {
           updatedAt: 'desc',
