@@ -393,7 +393,6 @@ export class ChatController {
   async getMessages(
     @Param('groupId') groupId: string,
     @Req() req: any,
-    @Query('limit') limit: string = '10',
     @Query('cursor') cursor?: string,
   ) {
     try {
@@ -412,7 +411,7 @@ export class ChatController {
         );
       }
 
-      const parsedLimit = Math.min(parseInt(limit) || 10, 50);
+      const parsedLimit = 10;
 
       const messageData = await this.chatService.getMessagesPaginated(
         groupId,

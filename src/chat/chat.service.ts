@@ -390,30 +390,33 @@ export class ChatService {
         },
       };
 
-      // Add cursor condition if provided
+      // If cursor is provided, get messages older than the cursor
       if (cursor) {
-        queryOptions.cursor = {
-          id: cursor,
+        queryOptions.where.createdAt = {
+          lt: (await this.prisma.message.findUnique({
+            where: { id: cursor },
+            select: { createdAt: true },
+          }))?.createdAt,
         };
-        queryOptions.skip = 1; // Skip the cursor message
       }
 
       const messages = await this.prisma.message.findMany(queryOptions);
 
-      // Type assertion to help TypeScript understand that messages have readBy property
+      // Get the next cursor (oldest message in the batch)
+      const nextCursor = messages.length === limit ? messages[messages.length - 1].id : null;
+
+      // Format messages and their read receipts
       const formattedMessages = messages.map((message: any) => ({
         ...message,
         readBy: message.readBy.map((read) => read.userId),
       }));
 
-      // Get the next cursor
-      const nextCursor =
-        messages.length === limit ? messages[messages.length - 1].id : null;
-
       this.logger.debug(
         `Retrieved ${messages.length} messages for group ${groupId}, nextCursor: ${nextCursor || 'none'}`,
       );
 
+      this.logger.debug(`Next cursor: ${nextCursor || 'none'}`);
+      this.logger.debug(`Returning ${messages} messages`);
       return {
         messages: formattedMessages.reverse(), // Return in chronological order
         nextCursor,
