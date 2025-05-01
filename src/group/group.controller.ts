@@ -282,4 +282,38 @@ export class GroupController {
       };
     }
   }
+
+  @Post(':groupId/rename')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Đổi tên nhóm' })
+  @ApiParam({ name: 'groupId', description: 'ID của nhóm' })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Tên nhóm đã được đổi thành công',
+  })
+  @ApiResponse({
+    status: HttpStatus.BAD_REQUEST,
+    description: 'Không thể đổi tên nhóm',
+  })
+  async renameGroup(
+    @Request() req: any,
+    @Param('groupId') groupId: string,
+    @Body() body: { name: string },
+  ) {
+    try {
+      const accountId = req.account.id;
+      if (!body.name) {
+        return {
+          statusCode: HttpStatus.BAD_REQUEST,
+          message: 'Vui lòng nhập tên nhóm mới',
+        };
+      }
+      return this.groupService.renameGroup(groupId, accountId, body.name);
+    } catch (error: any) {
+      return {
+        statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
+        message: error.message || 'Đã xảy ra lỗi khi đổi tên nhóm',
+      };
+    }
+  }
 }
