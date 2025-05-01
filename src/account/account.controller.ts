@@ -70,7 +70,7 @@ export class AccountController {
     @Req() req: any, // req.account contains decoded JWT payload after JwtAuthGuard processes the request
   ) {
     try {
-      this.logger.debug('Account object:', req.account);
+      this.logger.debug(`Account object: ${req.account}`);
       this.logger.debug(`ID param: ${id}`);
 
       if (req.account.id !== id && req.account.role !== 'ADMIN') {

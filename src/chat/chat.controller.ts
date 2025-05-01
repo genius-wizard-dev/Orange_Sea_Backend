@@ -5,6 +5,7 @@ import {
   Delete,
   ForbiddenException,
   Get,
+  Inject,
   Logger,
   Param,
   Post,
@@ -27,6 +28,7 @@ import {
 import { MessageType } from '@prisma/client';
 import { JwtAuthGuard } from 'src/auth/guards/auth.guard';
 import { GroupService } from 'src/group/group.service';
+import { ChatGateway } from './chat.gateway';
 import { ChatService } from './chat.service';
 import { ApiResponseDto } from './dto/chat-response.dto';
 import { ForwardMessageDto } from './dto/forward-message.dto';
@@ -40,6 +42,7 @@ export class ChatController {
   constructor(
     private readonly chatService: ChatService,
     private readonly groupService: GroupService,
+    @Inject(ChatGateway) private readonly chatGateway: ChatGateway,
   ) {}
 
   @Post('send')
@@ -232,6 +235,20 @@ export class ChatController {
         messageId,
         profile.id,
       );
+
+      // Check if this was the last message in the group
+      const wasLastMessage = await this.chatService.isLastMessageInGroup(
+        messageId,
+        message.groupId,
+      );
+
+      // Emit socket event for message recall
+      this.chatGateway.server.to(message.groupId).emit('messageRecalled', {
+        messageId,
+        groupId: message.groupId,
+        recalledMessage,
+        wasLastMessage,
+      });
 
       return {
         status: 'success',
@@ -427,6 +444,99 @@ export class ChatController {
       };
     } catch (error) {
       this.logger.error(`Error getting messages: ${error.message}`);
+      return {
+        status: 'error',
+        statusCode: error.status || 400,
+        message: error.message,
+      };
+    }
+  }
+
+  @Put('edit/:messageId')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Chỉnh sửa tin nhắn' })
+  @ApiParam({ name: 'messageId', description: 'ID của tin nhắn cần chỉnh sửa' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        newContent: {
+          type: 'string',
+          example: 'Nội dung tin nhắn đã chỉnh sửa',
+        },
+      },
+      required: ['newContent'],
+    },
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Tin nhắn đã được chỉnh sửa thành công',
+    type: ApiResponseDto,
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Tin nhắn không tồn tại hoặc không phải tin nhắn văn bản',
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'Người dùng không có quyền chỉnh sửa tin nhắn này',
+  })
+  async editMessage(
+    @Param('messageId') messageId: string,
+    @Body('newContent') newContent: string,
+    @Req() req: any,
+  ) {
+    try {
+      if (!newContent || newContent.trim() === '') {
+        throw new BadRequestException('Nội dung tin nhắn không được để trống');
+      }
+
+      const accountId = req.account.id;
+      const profile =
+        await this.groupService.getProfileFromAccountId(accountId);
+
+      const message = await this.chatService.getMessageById(messageId);
+      if (!message) {
+        throw new BadRequestException('Tin nhắn không tồn tại');
+      }
+
+      const isMember = await this.groupService.isGroupMember(
+        profile.id,
+        message.groupId,
+      );
+      if (!isMember) {
+        throw new ForbiddenException(
+          'Bạn không phải là thành viên của nhóm chat này',
+        );
+      }
+
+      const editedMessage = await this.chatService.editMessage(
+        messageId,
+        newContent,
+        profile.id,
+      );
+
+      // Check if this was the last message in the group
+      const wasLastMessage = await this.chatService.isLastMessageInGroup(
+        messageId,
+        message.groupId,
+      );
+
+      // Emit socket event for message edit
+      this.chatGateway.server.to(message.groupId).emit('messageEdited', {
+        messageId,
+        groupId: message.groupId,
+        editedMessage,
+        wasLastMessage,
+      });
+
+      return {
+        status: 'success',
+        statusCode: 200,
+        data: editedMessage,
+      };
+    } catch (error) {
+      this.logger.error(`Error editing message: ${error.message}`);
       return {
         status: 'error',
         statusCode: error.status || 400,

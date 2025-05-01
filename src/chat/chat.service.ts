@@ -393,17 +393,20 @@ export class ChatService {
       // If cursor is provided, get messages older than the cursor
       if (cursor) {
         queryOptions.where.createdAt = {
-          lt: (await this.prisma.message.findUnique({
-            where: { id: cursor },
-            select: { createdAt: true },
-          }))?.createdAt,
+          lt: (
+            await this.prisma.message.findUnique({
+              where: { id: cursor },
+              select: { createdAt: true },
+            })
+          )?.createdAt,
         };
       }
 
       const messages = await this.prisma.message.findMany(queryOptions);
 
       // Get the next cursor (oldest message in the batch)
-      const nextCursor = messages.length === limit ? messages[messages.length - 1].id : null;
+      const nextCursor =
+        messages.length === limit ? messages[messages.length - 1].id : null;
 
       // Format messages and their read receipts
       const formattedMessages = messages.map((message: any) => ({
@@ -657,8 +660,6 @@ export class ChatService {
           type: originalMessage.type,
           content: originalMessage.content,
           fileUrl: originalMessage.fileUrl,
-          forwardedFrom: messageId,
-          forwardedAt: new Date(),
           readBy: {
             create: [{ userId: senderId }],
           },
@@ -672,5 +673,69 @@ export class ChatService {
       );
       throw error;
     }
+  }
+
+  async editMessage(messageId: string, newContent: string, profileId: string) {
+    this.logger.debug(`Editing message ${messageId} by user ${profileId}`);
+
+    try {
+      // Kiểm tra tin nhắn tồn tại
+      const message = await this.prisma.message.findUnique({
+        where: { id: messageId },
+      });
+
+      if (!message) {
+        throw new BadRequestException('Tin nhắn không tồn tại');
+      }
+
+      // Chỉ cho phép người gửi chỉnh sửa tin nhắn
+      if (message.senderId !== profileId) {
+        throw new ForbiddenException(
+          'Bạn không có quyền chỉnh sửa tin nhắn này',
+        );
+      }
+
+      if (message.type !== MessageType.TEXT) {
+        throw new BadRequestException(
+          'Chỉ tin nhắn văn bản mới có thể chỉnh sửa',
+        );
+      }
+
+      const updatedMessage = await this.prisma.message.update({
+        where: { id: messageId },
+        data: {
+          content: newContent,
+          originalContent: message.originalContent || message.content,
+          updatedAt: new Date(),
+        },
+      });
+
+      return updatedMessage;
+    } catch (error) {
+      this.logger.error(`Error editing message ${messageId}: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Check if a message is the last message in a group
+   */
+  async isLastMessageInGroup(
+    messageId: string,
+    groupId: string,
+  ): Promise<boolean> {
+    const lastMessage = await this.prisma.message.findFirst({
+      where: {
+        groupId: groupId,
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    return lastMessage?.id === messageId;
   }
 }
