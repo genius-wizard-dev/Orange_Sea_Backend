@@ -398,17 +398,75 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   @SubscribeMessage('recall')
   async handleRecallMessage(
-    @MessageBody() data: { messageId: string; groupId: string },
+    @MessageBody()
+    data: { messageId: string; groupId: string; senderId: string },
     @ConnectedSocket() client: Socket,
   ) {
     try {
-      const { messageId, groupId } = data;
-      if (!messageId || !groupId)
-        throw new Error('messageId and groupId are required');
+      const { messageId, groupId, senderId } = data;
+      if (!messageId || !groupId || !senderId)
+        throw new Error('messageId, groupId and senderId are required');
 
-      this.server.to(groupId).emit('messageRecalled', { messageId, groupId });
-      this.logger.log({ message: 'Message recalled', messageId, groupId });
-      return { status: 'success' };
+      await this.validateGroupMembership(senderId, groupId);
+
+      // Get message data before it's recalled
+      const messageResult = await this.chatService.getMessageById(messageId);
+      if (!messageResult) throw new Error('Message not found');
+
+      // Recall the message
+      const recalledMessage = await this.chatService.recallMessage(
+        messageId,
+        senderId,
+      );
+
+      // Check if this was the last message in the group
+      const wasLastMessage = await this.chatService.isLastMessageInGroup(
+        messageId,
+        groupId,
+      );
+
+      // Broadcast to all users in the group
+      this.server.to(groupId).emit('messageRecalled', {
+        messageId,
+        groupId,
+        recalledMessage,
+        wasLastMessage,
+      });
+
+      // Notify all group participants who aren't currently viewing the group
+      const participants = await this.getCachedGroupParticipants(groupId);
+      const activeViewers = await this.getActiveViewers(groupId);
+
+      const notificationPromises = participants.map(async (participantId) => {
+        // Skip if user is actively viewing the group
+        if (activeViewers.includes(participantId)) return;
+
+        const userSockets = await this.redisService.smembers(
+          `${this.PROFILE_CONNECTIONS}${participantId}`,
+        );
+
+        if (userSockets.length > 0) {
+          // User is online but not viewing this group - notify them
+          userSockets.forEach((socketId) => {
+            this.server.to(socketId).emit('notifyMessageUpdate', {
+              type: 'MESSAGE_RECALLED',
+              groupId,
+              messageId,
+              wasLastMessage,
+            });
+          });
+        }
+      });
+
+      await Promise.all(notificationPromises);
+
+      this.logger.log({
+        message: 'Message recalled',
+        messageId,
+        groupId,
+        wasLastMessage,
+      });
+      return { status: 'success', data: recalledMessage };
     } catch (error) {
       this.logger.error({
         message: 'Error recalling message',
@@ -418,65 +476,93 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
-  @SubscribeMessage('forward')
-  async handleForwardMessage(
+  @SubscribeMessage('edit')
+  async handleEditMessage(
     @MessageBody()
-    data: { messageId: string; targetGroupId: string; senderId: string },
+    data: {
+      messageId: string;
+      groupId: string;
+      senderId: string;
+      newContent: string;
+    },
     @ConnectedSocket() client: Socket,
   ) {
     try {
-      const { messageId, targetGroupId, senderId } = data;
-      if (!messageId || !targetGroupId || !senderId)
-        throw new Error('messageId, targetGroupId and senderId are required');
+      const { messageId, groupId, senderId, newContent } = data;
+      if (!messageId || !groupId || !senderId || !newContent)
+        throw new Error(
+          'messageId, groupId, senderId and newContent are required',
+        );
 
-      await this.validateGroupMembership(senderId, targetGroupId);
+      await this.validateGroupMembership(senderId, groupId);
+
+      // Check if message exists
       const messageResult = await this.chatService.getMessageById(messageId);
       if (!messageResult) throw new Error('Message not found');
 
-      const activeReaders = await this.getActiveViewers(targetGroupId);
-      const messageData = {
-        ...messageResult,
-        readBy: messageResult.readBy?.map((r) => r.userId) || [],
-        isForwarded: true,
-        originalMessageId: messageId,
-      };
+      // Validate sender is the message author
+      if (messageResult.senderId !== senderId) {
+        throw new Error('You can only edit your own messages');
+      }
 
-      this.server.to(targetGroupId).emit('newMessage', messageData);
+      // Edit the message
+      const editedMessage = await this.chatService.editMessage(
+        messageId,
+        newContent,
+        senderId,
+      );
 
-      const participants = await this.getCachedGroupParticipants(targetGroupId);
+      // Check if this was the last message in the group
+      const wasLastMessage = await this.chatService.isLastMessageInGroup(
+        messageId,
+        groupId,
+      );
+
+      // Broadcast to users in the group
+      this.server.to(groupId).emit('messageEdited', {
+        messageId,
+        groupId,
+        editedMessage,
+        wasLastMessage,
+      });
+
+      // Notify all group participants who aren't currently viewing the group
+      const participants = await this.getCachedGroupParticipants(groupId);
+      const activeViewers = await this.getActiveViewers(groupId);
+
       const notificationPromises = participants.map(async (participantId) => {
-        if (activeReaders.includes(participantId)) return;
+        if (activeViewers.includes(participantId)) return;
 
         const userSockets = await this.redisService.smembers(
           `${this.PROFILE_CONNECTIONS}${participantId}`,
         );
+
         if (userSockets.length > 0) {
-          const unreadCounts =
-            await this.chatService.getUnreadMessageCountsByGroups(
-              participantId,
-            );
+          // User is online but not viewing this group
           userSockets.forEach((socketId) => {
-            this.server.to(socketId).emit('messageUpdate', {
-              type: 'NEW_MESSAGE',
-              groupId: targetGroupId,
-              message: messageData,
-              unreadCounts,
+            this.server.to(socketId).emit('notifyMessageUpdate', {
+              type: 'MESSAGE_EDITED',
+              groupId,
+              messageId,
+              editedMessage,
+              wasLastMessage,
             });
           });
         }
       });
 
       await Promise.all(notificationPromises);
+
       this.logger.log({
-        message: 'Message forwarded',
+        message: 'Message edited',
         messageId,
-        targetGroupId,
-        senderId,
+        groupId,
+        wasLastMessage,
       });
-      return { status: 'success' };
+      return { status: 'success', data: editedMessage };
     } catch (error) {
       this.logger.error({
-        message: 'Error forwarding message',
+        message: 'Error editing message',
         error: error.message,
       });
       return { status: 'error', message: error.message };

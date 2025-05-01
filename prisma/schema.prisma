@@ -115,14 +115,11 @@ model Message {
   fileSize        Int?
   isRecalled      Boolean          @default(false)
   recalledAt      DateTime?
-  editedAt        DateTime?
   originalContent String?
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
   readBy          ReadMessage[]
   deletedBy       DeletedMessage[]
-  forwardedFrom   String?          @db.ObjectId
-  forwardedAt     DateTime?
 
   @@index([groupId, createdAt(sort: Desc)])
   @@index([senderId])

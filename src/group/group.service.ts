@@ -320,16 +320,15 @@ export class GroupService {
           },
           participants: {
             include: {
-
               user: {
                 select: {
-                  id:true,
+                  id: true,
                   name: true,
-                  avatar: true
-                }
-              }
-            }
-          }
+                  avatar: true,
+                },
+              },
+            },
+          },
         },
         orderBy: {
           updatedAt: 'desc',
@@ -680,6 +679,57 @@ export class GroupService {
         `Error transferring ownership: ${error.message}`,
         error.stack,
       );
+      throw error;
+    }
+  }
+
+  async renameGroup(groupId: string, accountId: string, newName: string) {
+    try {
+      const group = await this.prismaService.group.findUnique({
+        where: { id: groupId },
+        include: {
+          participants: true,
+        },
+      });
+
+      if (!group) {
+        throw new Error('Group not found');
+      }
+
+      // Check if it's a group chat (not a direct message)
+      if (!group.isGroup) {
+        throw new Error('Renaming is only available for group chats');
+      }
+
+      const profile = await this.getProfileFromAccountId(accountId);
+      const userId = profile.id;
+
+      // Check if requester is the current owner
+      const requester = group.participants.find((p) => p.userId === userId);
+      if (!requester || requester.role !== 'OWNER') {
+        throw new Error('Only the current owner can rename the group');
+      }
+
+      // Update group name
+      const updatedGroup = await this.prismaService.group.update({
+        where: { id: groupId },
+        data: { name: newName },
+        include: {
+          participants: {
+            include: {
+              user: true,
+            },
+          },
+        },
+      });
+
+      return {
+        statusCode: 200,
+        message: 'Group renamed successfully',
+        data: updatedGroup,
+      };
+    } catch (error) {
+      this.logger.error(`Error renaming group: ${error.message}`, error.stack);
       throw error;
     }
   }
