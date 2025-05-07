@@ -62,7 +62,7 @@ jobs:
           push: true
           tags: ${{ secrets.DOCKER_USERNAME }}/orange-sea-backend:latest
           cache-from: type=registry,ref=${{ secrets.DOCKER_USERNAME }}/orange-sea-backend:buildcache
-          cache-to: type=registry,ref=${{ secrets.DOCKER_USERNAME }}/orange-sea-backend:buildcache,mode=max
+          cache-to: type=inline
 
   deploy:
     needs: build-and-test
