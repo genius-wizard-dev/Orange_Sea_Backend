@@ -1,8 +1,8 @@
-name: NestJS CI
+name: CI/CD Pipeline
 
 on:
   push:
-    branches: [dev]
+    branches: [main]
 
 jobs:
   build-and-test:
@@ -63,3 +63,27 @@ jobs:
           tags: ${{ secrets.DOCKER_USERNAME }}/orange-sea-backend:latest
           cache-from: type=registry,ref=${{ secrets.DOCKER_USERNAME }}/orange-sea-backend:buildcache
           cache-to: type=registry,ref=${{ secrets.DOCKER_USERNAME }}/orange-sea-backend:buildcache,mode=max
+
+  deploy:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Deploy via SSH
+        run: |
+          ssh -o StrictHostKeyChecking=no ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} << 'EOF'
+            set -e
+            cd /home/
+            docker compose pull
+            docker compose up -d --build
+          EOF
