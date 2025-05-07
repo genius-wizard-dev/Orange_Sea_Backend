@@ -1,7 +1,7 @@
 version: '3'
 services:
   app:
-    image: nguyenthanhthuan/orange-sea-backend:latest
+    image: nguyenthanhthuan/orange_sea_backend:latest
     ports:
       - '8000:8000'
     env_file:

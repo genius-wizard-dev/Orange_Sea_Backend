@@ -16,11 +16,8 @@ COPY dist ./dist
 # Copy file schema.prisma vào container (nếu chỉ có schema)
 COPY prisma/schema.prisma ./prisma/schema.prisma
 
-# Nếu có file .env thì copy luôn (nếu có)
-# COPY .env .env
-
 # Khai báo cổng sẽ sử dụng
 EXPOSE 8000
 
-# Lệnh chạy Prisma Client generate và sau đó chạy app
-CMD ["npx", "prisma", "generate", "&&", "node", "dist/main.js"]
+# Sử dụng JSON array với shell làm entrypoint
+CMD ["/bin/sh", "-c", "npx prisma generate && node dist/main.js"]
