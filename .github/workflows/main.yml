@@ -64,7 +64,7 @@ jobs:
           context: .
           file: ./Dockerfile
           push: true
-          tags: ${{ secrets.DOCKER_USERNAME }}/orange_sea_backend:latest
+          tags: nguyenthanhthuan/orange_sea_backend:latest
 
   deploy:
     needs: build-and-push
