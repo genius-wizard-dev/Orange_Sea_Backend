@@ -5,7 +5,7 @@ on:
     branches: [main]
 
 jobs:
-  build-and-test:
+  build-and-push:
     runs-on: ubuntu-latest
 
     steps:
@@ -60,12 +60,12 @@ jobs:
         with:
           context: .
           push: true
-          tags: ${{ secrets.DOCKER_USERNAME }}/orange-sea-backend:latest
+          tags: ${{ secrets.DOCKER_USERNAME }}/orange-sea-backend:latest,${{ secrets.DOCKER_USERNAME }}/orange-sea-backend:${{ github.sha }}
           cache-from: type=registry,ref=${{ secrets.DOCKER_USERNAME }}/orange-sea-backend:buildcache
           cache-to: type=inline
 
   deploy:
-    needs: build-and-test
+    needs: build-and-push
     runs-on: ubuntu-latest
 
     steps:
