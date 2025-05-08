@@ -31,12 +31,12 @@ import { JwtAuthGuard } from 'src/auth/guards/auth.guard';
 import { GroupService } from 'src/group/group.service';
 import { ProfileService } from 'src/profile/profile.service';
 import { ChatGateway } from './chat.gateway';
+import { ChatService } from './chat.service';
 import { ApiResponseDto } from './dto/chat.response.dto';
 import { EditMessageDto } from './dto/edit.message.dto';
 import { ForwardMessageDto } from './dto/forward.message.dto';
 import { GetMediaDto, MediaMessageType } from './dto/get.media.dto';
 import { SendMessageDto } from './dto/send.message.dto';
-import { ChatService } from './services/chat.service';
 
 @ApiTags('Chat')
 @ApiBearerAuth('JWT-auth')

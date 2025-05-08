@@ -25,22 +25,35 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleInit() {
-    // If already connected or in the process of connecting, return
-    if (RedisService.isConnected) {
-      this.logger.debug('Redis client already connected, skipping connection');
-      return;
-    }
+    try {
+      // If already connected or in the process of connecting, return
+      if (RedisService.isConnected) {
+        this.logger.debug(
+          'Redis client already connected, skipping connection',
+        );
+        return;
+      }
 
-    // If connection is in progress, wait for it
-    if (RedisService.connectionPromise) {
-      this.logger.debug('Redis connection in progress, waiting...');
+      // If connection is in progress, wait for it
+      if (RedisService.connectionPromise) {
+        this.logger.debug('Redis connection in progress, waiting...');
+        await RedisService.connectionPromise;
+        return;
+      }
+
+      // Start connection process
+      RedisService.connectionPromise = this.connect();
       await RedisService.connectionPromise;
-      return;
+    } catch (error) {
+      this.logger.error({
+        message: 'Failed to initialize Redis connection',
+        error: error.message,
+        stack: error.stack,
+      });
+      // Reset the connection promise so it can be retried
+      RedisService.connectionPromise = null;
+      // Don't throw here to allow the application to start even if Redis is down
     }
-
-    // Start connection process
-    RedisService.connectionPromise = this.connect();
-    await RedisService.connectionPromise;
   }
 
   private async connect(): Promise<void> {
@@ -52,12 +65,37 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     this.redisClient = new Redis(redisUrl, {
       retryStrategy: (times) => Math.min(times * 50, 2000), // Exponential backoff
       maxRetriesPerRequest: 3,
+      connectTimeout: 10000, // 10 seconds timeout for initial connection
+      enableReadyCheck: true,
+      enableOfflineQueue: true,
     });
 
     return new Promise<void>((resolve, reject) => {
+      // Set a timeout for connection
+      const connectionTimeout = setTimeout(() => {
+        if (!RedisService.isConnected) {
+          const error = new Error('Redis connection timeout after 10 seconds');
+          this.logger.error({
+            message: 'Redis connection timeout',
+            error: error.message,
+          });
+          reject(error);
+          try {
+            this.redisClient.disconnect();
+          } catch (e) {
+            // Ignore disconnect errors
+          }
+        }
+      }, 10000);
+
       this.redisClient.on('connect', () => {
+        this.logger.log({ message: 'Redis client connecting...' });
+      });
+
+      this.redisClient.on('ready', () => {
+        clearTimeout(connectionTimeout);
         RedisService.isConnected = true;
-        this.logger.log({ message: 'Redis client connected' });
+        this.logger.log({ message: 'Redis client ready and connected' });
         resolve();
       });
 
@@ -67,7 +105,15 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
           error: error.message,
         });
         if (!RedisService.isConnected) {
+          clearTimeout(connectionTimeout);
           reject(error);
+        }
+      });
+
+      this.redisClient.on('close', () => {
+        this.logger.warn({ message: 'Redis connection closed' });
+        if (RedisService.isConnected) {
+          RedisService.isConnected = false;
         }
       });
     });
@@ -381,27 +427,44 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   }
 
   multi(): Pipeline {
-    // Cast to ensure correct return type
-    return this.redisClient.multi() as Pipeline;
+    try {
+      if (!this.redisClient || !RedisService.isConnected) {
+        this.logger.error({
+          message: 'Cannot create Redis pipeline, client not connected',
+          isConnected: RedisService.isConnected,
+          hasClient: !!this.redisClient,
+        });
+        throw new Error('Redis client not connected');
+      }
+      return this.redisClient.multi() as Pipeline;
+    } catch (error) {
+      this.logger.error({
+        message: 'Error creating Redis pipeline',
+        error: error.message,
+      });
+      throw error;
+    }
   }
 
   async exec(pipeline: Pipeline): Promise<Array<[Error | null, any]>> {
     try {
-      const result = await pipeline.exec();
-      if (!result) {
-        this.logger.error({
-          message: 'Pipeline execution returned null',
-        });
-        return [];
+      if (!pipeline) {
+        throw new Error('Invalid Redis pipeline');
       }
+
+      if (!this.redisClient || !RedisService.isConnected) {
+        throw new Error('Redis client not connected');
+      }
+
+      const results = await pipeline.exec();
       this.logger.debug({
-        message: 'Executed pipeline',
-        commands: result.length,
+        message: 'Executed Redis pipeline',
+        results: results ? results.length : 0,
       });
-      return result;
+      return results || [];
     } catch (error) {
       this.logger.error({
-        message: 'Error executing pipeline',
+        message: 'Error executing Redis pipeline',
         error: error.message,
       });
       throw error;
