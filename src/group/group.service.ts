@@ -310,6 +310,10 @@ export class GroupService {
               senderId: true,
               fileUrl: true,
               createdAt: true,
+              updatedAt: true,
+              isRecalled: true,
+              type: true,
+              fileName: true,
             },
             orderBy: {
               createdAt: 'desc',
