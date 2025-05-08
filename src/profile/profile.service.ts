@@ -53,6 +53,18 @@ export class ProfileService {
     };
   }
 
+  async getProfileFromAccountId(accountId: string) {
+    const profile = await this.prismaService.profile.findUnique({
+      where: { accountId: accountId },
+    });
+
+    if (!profile) {
+      throw new NotFoundException('Profile not found');
+    }
+
+    return profile;
+  }
+
   async updateProfile(
     accountId: string,
     updateProfileDTO: UpdateProfileDTO,

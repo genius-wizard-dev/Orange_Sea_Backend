@@ -33,7 +33,7 @@ import {
 import { JwtAuthGuard } from './guards/auth.guard';
 import { JwtRefreshGuard } from './guards/jwt-refresh.guard';
 
-@ApiTags('auth')
+@ApiTags('Auth')
 @Controller('auth')
 export class AuthController {
   private readonly logger = new Logger(AuthController.name);
@@ -187,7 +187,7 @@ export class AuthController {
   }
 
   @Post('refresh')
-  @ApiBearerAuth()
+  @ApiBearerAuth('JWT-auth')
   @UseGuards(JwtRefreshGuard)
   @ApiOperation({ summary: 'Làm mới access token bằng refresh token' })
   @ApiResponse({ status: 200, description: 'Làm mới token thành công' })
@@ -239,6 +239,7 @@ export class AuthController {
 
   @Post('logout')
   @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Đăng xuất và thu hồi token' })
   @ApiResponse({ status: 200, description: 'Đăng xuất thành công' })
   async logout(

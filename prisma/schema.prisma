@@ -20,7 +20,6 @@ enum FriendshipStatus {
 
 enum GroupRole {
   OWNER
-  // ADMIN
   MEMBER
 }
 
@@ -79,6 +78,7 @@ model Friendship {
 model Group {
   id           String        @id @default(auto()) @map("_id") @db.ObjectId
   name         String?
+  avatar       String?
   isGroup      Boolean       @default(false)
   owner        Profile       @relation("Owner", fields: [ownerId], references: [id], onDelete: Cascade)
   ownerId      String        @db.ObjectId

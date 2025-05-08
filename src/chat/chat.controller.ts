@@ -18,6 +18,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import {
+  ApiBearerAuth,
   ApiBody,
   ApiConsumes,
   ApiOperation,
@@ -28,22 +29,83 @@ import {
 import { MessageType } from '@prisma/client';
 import { JwtAuthGuard } from 'src/auth/guards/auth.guard';
 import { GroupService } from 'src/group/group.service';
+import { ProfileService } from 'src/profile/profile.service';
 import { ChatGateway } from './chat.gateway';
-import { ChatService } from './chat.service';
-import { ApiResponseDto } from './dto/chat-response.dto';
-import { ForwardMessageDto } from './dto/forward-message.dto';
-import { SendMessageDto } from './dto/send-message.dto';
+import { ApiResponseDto } from './dto/chat.response.dto';
+import { EditMessageDto } from './dto/edit.message.dto';
+import { ForwardMessageDto } from './dto/forward.message.dto';
+import { GetMediaDto, MediaMessageType } from './dto/get.media.dto';
+import { SendMessageDto } from './dto/send.message.dto';
+import { ChatService } from './services/chat.service';
 
 @ApiTags('Chat')
+@ApiBearerAuth('JWT-auth')
 @Controller('chat')
 export class ChatController {
   private readonly logger = new Logger(ChatController.name);
 
   constructor(
     private readonly chatService: ChatService,
+    private readonly profileService: ProfileService,
     private readonly groupService: GroupService,
     @Inject(ChatGateway) private readonly chatGateway: ChatGateway,
   ) {}
+
+  private async getUserProfile(accountId: string) {
+    return this.profileService.getProfileFromAccountId(accountId);
+  }
+
+  private async validateGroupMembership(
+    profileId: string,
+    groupId: string,
+  ): Promise<void> {
+    const isMember = await this.groupService.isGroupMember(profileId, groupId);
+    if (!isMember) {
+      throw new ForbiddenException(
+        'Bạn không phải là thành viên của nhóm chat này',
+      );
+    }
+  }
+
+  private async validateMessageAccess(messageId: string, profileId: string) {
+    const message = await this.chatService.getMessageById(messageId);
+    if (!message) {
+      throw new BadRequestException('Tin nhắn không tồn tại');
+    }
+
+    await this.validateGroupMembership(profileId, message.groupId);
+
+    return message;
+  }
+
+  private async validateMessageOwnership(messageId: string, profileId: string) {
+    const message = await this.validateMessageAccess(messageId, profileId);
+
+    if (message.senderId !== profileId) {
+      throw new ForbiddenException(
+        'Bạn không có quyền thực hiện tác vụ này với tin nhắn',
+      );
+    }
+
+    return message;
+  }
+
+  private createSuccessResponse(data: any) {
+    return {
+      status: 'success',
+      statusCode: 200,
+      data: data,
+    };
+  }
+
+  private createErrorResponse(error: any) {
+    this.logger.error(`Error: ${error.message}`, error.stack);
+    return {
+      status: 'error',
+      statusCode: error.status || 400,
+      message: error.message,
+    };
+  }
 
   @Post('send')
   @UseGuards(JwtAuthGuard)
@@ -90,101 +152,52 @@ export class ChatController {
     @Req() req: any,
   ) {
     try {
-      let { groupId, message = '', type = MessageType.TEXT } = data;
-      this.logger.debug(`File received: ${file ? 'yes' : 'no'}`);
+      const { groupId, message = '', type = MessageType.TEXT } = data;
+      const profile = await this.getUserProfile(req.account.id);
 
+      // Xác thực thành viên nhóm
+      await this.validateGroupMembership(profile.id, groupId);
+
+      // Xác định loại tin nhắn dựa vào file nếu có
+      let messageType = type;
       if (file) {
-        // Fix filename encoding if needed
-        let originalFilename = file.originalname;
+        this.logger.debug(
+          `File received: mimetype=${file.mimetype}, size=${file.size} bytes`,
+        );
+
+        // Sửa lỗi mã hóa tên file nếu cần
         try {
-          const decodedName = Buffer.from(originalFilename, 'latin1').toString(
+          const decodedName = Buffer.from(file.originalname, 'latin1').toString(
             'utf8',
-          );
-          this.logger.debug(
-            `Fixed filename encoding: ${originalFilename} → ${decodedName}`,
           );
           file.originalname = decodedName;
         } catch (e) {
           this.logger.warn(`Error fixing filename encoding: ${e.message}`);
         }
 
-        this.logger.debug(
-          `File details - filename: ${file.originalname}, mimetype: ${file.mimetype}, size: ${file.size} bytes`,
-        );
-      }
-
-      // Get the sender's profile from account
-      const accountId = req.account.id;
-      this.logger.debug(`Sender accountId: ${accountId}`);
-
-      const profile =
-        await this.groupService.getProfileFromAccountId(accountId);
-      const senderId = profile.id;
-      this.logger.debug(`Resolved profile ID: ${senderId}`);
-
-      // Determine message type based on file if present
-      if (file) {
-        const mimeType = file.mimetype;
-        this.logger.debug(
-          `Processing file with mimetype: ${mimeType}, original filename: ${file.originalname}`,
-        );
-
-        if (mimeType.startsWith('image/')) {
-          type = MessageType.IMAGE;
-          this.logger.debug('Setting message type to IMAGE');
-        } else if (mimeType.startsWith('video/')) {
-          type = MessageType.VIDEO;
-          this.logger.debug('Setting message type to VIDEO');
+        // Xác định loại tin nhắn dựa trên MIME type
+        if (file.mimetype.startsWith('image/')) {
+          messageType = MessageType.IMAGE;
+        } else if (file.mimetype.startsWith('video/')) {
+          messageType = MessageType.VIDEO;
         } else {
-          type = MessageType.RAW;
-          this.logger.debug('Setting message type to RAW');
+          messageType = MessageType.RAW;
         }
       }
 
-      // Kiểm tra xem người dùng có phải là thành viên của nhóm chat không
-      this.logger.debug(
-        `Checking if user ${senderId} is a member of group ${groupId}`,
-      );
-      const isMember = await this.groupService.isGroupMember(senderId, groupId);
-      if (!isMember) {
-        this.logger.warn(
-          `User ${senderId} is not a member of group ${groupId}`,
-        );
-        throw new ForbiddenException(
-          'Bạn không phải là thành viên của nhóm chat này',
-        );
-      }
-
-      // Gọi service để lưu tin nhắn
-      this.logger.debug(`Sending message to chatService with type: ${type}`);
+      // Gửi tin nhắn qua service
       const messageResult = await this.chatService.sendMessage(
-        senderId,
+        profile.id,
         groupId,
         message,
-        type,
+        messageType,
         [],
         file,
       );
 
-      this.logger.debug(`Message sent successfully, id: ${messageResult.id}`);
-      if (file) {
-        this.logger.debug(
-          `Message file URL: ${messageResult.fileUrl || 'NOT SET'}`,
-        );
-      }
-
-      return {
-        status: 'success',
-        statusCode: 200,
-        data: messageResult,
-      };
+      return this.createSuccessResponse(messageResult);
     } catch (error) {
-      this.logger.error(`Error sending message: ${error.message}`, error.stack);
-      return {
-        status: 'error',
-        statusCode: error.status || 400,
-        message: error.message,
-      };
+      return this.createErrorResponse(error);
     }
   }
 
@@ -204,45 +217,27 @@ export class ChatController {
   })
   async recallMessage(@Param('messageId') messageId: string, @Req() req: any) {
     try {
-      const accountId = req.account.id;
-      const profile =
-        await this.groupService.getProfileFromAccountId(accountId);
-      // Lấy thông tin tin nhắn
-      const message = await this.chatService.getMessageById(messageId);
-      if (!message) {
-        throw new BadRequestException('Tin nhắn không tồn tại');
-      }
+      const profile = await this.getUserProfile(req.account.id);
 
-      // Kiểm tra người dùng có phải thành viên của nhóm không
-      const isMember = await this.groupService.isGroupMember(
+      // Xác thực quyền sở hữu tin nhắn
+      const message = await this.validateMessageOwnership(
+        messageId,
         profile.id,
-        message.groupId,
       );
-      if (!isMember) {
-        throw new ForbiddenException(
-          'Bạn không phải là thành viên của nhóm chat này',
-        );
-      }
 
-      // Kiểm tra người gửi tin nhắn
-      if (message.senderId !== profile.id) {
-        throw new ForbiddenException(
-          'Bạn không thể thu hồi tin nhắn của người khác',
-        );
-      }
-
+      // Thu hồi tin nhắn
       const recalledMessage = await this.chatService.recallMessage(
         messageId,
         profile.id,
       );
 
-      // Check if this was the last message in the group
+      // Kiểm tra xem đây có phải là tin nhắn cuối cùng trong nhóm không
       const wasLastMessage = await this.chatService.isLastMessageInGroup(
         messageId,
         message.groupId,
       );
 
-      // Emit socket event for message recall
+      // Gửi thông báo qua socket
       this.chatGateway.server.to(message.groupId).emit('messageRecalled', {
         messageId,
         groupId: message.groupId,
@@ -250,17 +245,9 @@ export class ChatController {
         wasLastMessage,
       });
 
-      return {
-        status: 'success',
-        statusCode: 200,
-        data: recalledMessage,
-      };
+      return this.createSuccessResponse(recalledMessage);
     } catch (error) {
-      return {
-        status: 'error',
-        statusCode: error.status || 400,
-        message: error.message,
-      };
+      return this.createErrorResponse(error);
     }
   }
 
@@ -280,38 +267,20 @@ export class ChatController {
   })
   async deleteMessage(@Param('messageId') messageId: string, @Req() req: any) {
     try {
-      const accountId = req.account.id;
-      const profile =
-        await this.groupService.getProfileFromAccountId(accountId);
-      const message = await this.chatService.getMessageById(messageId);
-      if (!message) {
-        throw new BadRequestException('Tin nhắn không tồn tại');
-      }
+      const profile = await this.getUserProfile(req.account.id);
 
-      // Kiểm tra người dùng có phải thành viên của nhóm không
-      const isMember = await this.groupService.isGroupMember(
-        profile.id,
-        message.groupId,
+      // Xác thực quyền truy cập tin nhắn
+      await this.validateMessageAccess(messageId, profile.id);
+
+      // Xóa tin nhắn
+      const result = await this.chatService.deleteMessage(
+        messageId,
+        req.account.id,
       );
-      if (!isMember) {
-        throw new ForbiddenException(
-          'Bạn không phải là thành viên của nhóm chat này',
-        );
-      }
 
-      const result = await this.chatService.deleteMessage(messageId, accountId);
-
-      return {
-        status: 'success',
-        statusCode: 200,
-        data: result,
-      };
+      return this.createSuccessResponse(result);
     } catch (error) {
-      return {
-        status: 'error',
-        statusCode: error.status || 400,
-        message: error.message,
-      };
+      return this.createErrorResponse(error);
     }
   }
 
@@ -331,55 +300,25 @@ export class ChatController {
   })
   async forwardMessage(@Body() data: ForwardMessageDto, @Req() req: any) {
     try {
-      const accountId = req.account.id;
-      const profile =
-        await this.groupService.getProfileFromAccountId(accountId);
+      const profile = await this.getUserProfile(req.account.id);
       const { messageId, targetGroupId } = data;
 
-      const message = await this.chatService.getMessageById(messageId);
-      if (!message) {
-        throw new BadRequestException('Tin nhắn không tồn tại');
-      }
+      // Xác thực tin nhắn và quyền truy cập
+      const message = await this.validateMessageAccess(messageId, profile.id);
 
-      // Kiểm tra người dùng có phải thành viên của nhóm gốc không
-      const isSourceMember = await this.groupService.isGroupMember(
-        profile.id,
-        message.groupId,
-      );
-      if (!isSourceMember) {
-        throw new ForbiddenException(
-          'Bạn không phải là thành viên của nhóm chat chứa tin nhắn này',
-        );
-      }
+      // Xác thực quyền truy cập vào nhóm đích
+      await this.validateGroupMembership(profile.id, targetGroupId);
 
-      // Kiểm tra người dùng có phải thành viên của nhóm đích không
-      const isTargetMember = await this.groupService.isGroupMember(
-        profile.id,
-        targetGroupId,
-      );
-      if (!isTargetMember) {
-        throw new ForbiddenException(
-          'Bạn không phải là thành viên của nhóm chat đích',
-        );
-      }
-
+      // Chuyển tiếp tin nhắn
       const forwardedMessage = await this.chatService.forwardMessage(
         messageId,
         targetGroupId,
         profile.id,
       );
 
-      return {
-        status: 'success',
-        statusCode: 200,
-        data: forwardedMessage,
-      };
+      return this.createSuccessResponse(forwardedMessage);
     } catch (error) {
-      return {
-        status: 'error',
-        statusCode: error.status || 400,
-        message: error.message,
-      };
+      return this.createErrorResponse(error);
     }
   }
 
@@ -413,42 +352,22 @@ export class ChatController {
     @Query('cursor') cursor?: string,
   ) {
     try {
-      const accountId = req.account.id;
-      const profile =
-        await this.groupService.getProfileFromAccountId(accountId);
+      const profile = await this.getUserProfile(req.account.id);
 
-      // Kiểm tra người dùng có phải thành viên của nhóm không
-      const isMember = await this.groupService.isGroupMember(
-        profile.id,
-        groupId,
-      );
-      if (!isMember) {
-        throw new ForbiddenException(
-          'Bạn không phải là thành viên của nhóm chat này',
-        );
-      }
+      // Xác thực quyền truy cập nhóm
+      await this.validateGroupMembership(profile.id, groupId);
 
-      const parsedLimit = 10;
-
+      const limit = 10;
       const messageData = await this.chatService.getMessagesPaginated(
         groupId,
         profile.id,
-        parsedLimit,
+        limit,
         cursor,
       );
 
-      return {
-        status: 'success',
-        statusCode: 200,
-        data: messageData,
-      };
+      return this.createSuccessResponse(messageData);
     } catch (error) {
-      this.logger.error(`Error getting messages: ${error.message}`);
-      return {
-        status: 'error',
-        statusCode: error.status || 400,
-        message: error.message,
-      };
+      return this.createErrorResponse(error);
     }
   }
 
@@ -456,18 +375,7 @@ export class ChatController {
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Chỉnh sửa tin nhắn' })
   @ApiParam({ name: 'messageId', description: 'ID của tin nhắn cần chỉnh sửa' })
-  @ApiBody({
-    schema: {
-      type: 'object',
-      properties: {
-        newContent: {
-          type: 'string',
-          example: 'Nội dung tin nhắn đã chỉnh sửa',
-        },
-      },
-      required: ['newContent'],
-    },
-  })
+  @ApiBody({ type: EditMessageDto })
   @ApiResponse({
     status: 200,
     description: 'Tin nhắn đã được chỉnh sửa thành công',
@@ -483,46 +391,38 @@ export class ChatController {
   })
   async editMessage(
     @Param('messageId') messageId: string,
-    @Body('newContent') newContent: string,
+    @Body() editMessageDto: EditMessageDto,
     @Req() req: any,
   ) {
     try {
+      const { newContent } = editMessageDto;
+
       if (!newContent || newContent.trim() === '') {
         throw new BadRequestException('Nội dung tin nhắn không được để trống');
       }
 
-      const accountId = req.account.id;
-      const profile =
-        await this.groupService.getProfileFromAccountId(accountId);
+      const profile = await this.getUserProfile(req.account.id);
 
-      const message = await this.chatService.getMessageById(messageId);
-      if (!message) {
-        throw new BadRequestException('Tin nhắn không tồn tại');
-      }
-
-      const isMember = await this.groupService.isGroupMember(
+      // Xác thực quyền sở hữu tin nhắn
+      const message = await this.validateMessageOwnership(
+        messageId,
         profile.id,
-        message.groupId,
       );
-      if (!isMember) {
-        throw new ForbiddenException(
-          'Bạn không phải là thành viên của nhóm chat này',
-        );
-      }
 
+      // Chỉnh sửa tin nhắn
       const editedMessage = await this.chatService.editMessage(
         messageId,
         newContent,
         profile.id,
       );
 
-      // Check if this was the last message in the group
+      // Kiểm tra xem đây có phải là tin nhắn cuối cùng trong nhóm không
       const wasLastMessage = await this.chatService.isLastMessageInGroup(
         messageId,
         message.groupId,
       );
 
-      // Emit socket event for message edit
+      // Gửi thông báo qua socket
       this.chatGateway.server.to(message.groupId).emit('messageEdited', {
         messageId,
         groupId: message.groupId,
@@ -530,18 +430,62 @@ export class ChatController {
         wasLastMessage,
       });
 
-      return {
-        status: 'success',
-        statusCode: 200,
-        data: editedMessage,
-      };
+      return this.createSuccessResponse(editedMessage);
     } catch (error) {
-      this.logger.error(`Error editing message: ${error.message}`);
-      return {
-        status: 'error',
-        statusCode: error.status || 400,
-        message: error.message,
-      };
+      return this.createErrorResponse(error);
+    }
+  }
+
+  @Get('media/:groupId')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({
+    summary: 'Lấy danh sách media (hình ảnh, video, file) của nhóm chat',
+  })
+  @ApiParam({ name: 'groupId', description: 'ID của nhóm chat' })
+  @ApiResponse({
+    status: 200,
+    description: 'Danh sách media của nhóm chat',
+    schema: {
+      properties: {
+        status: { type: 'string', example: 'success' },
+        statusCode: { type: 'number', example: 200 },
+        data: {
+          type: 'object',
+          properties: {
+            media: { type: 'array', items: { type: 'object' } },
+            nextCursor: { type: 'string', nullable: true },
+            hasMore: { type: 'boolean' },
+          },
+        },
+      },
+    },
+  })
+  @ApiResponse({ status: 400, description: 'Dữ liệu không hợp lệ' })
+  @ApiResponse({ status: 403, description: 'Không có quyền truy cập' })
+  async getGroupMedia(
+    @Param('groupId') groupId: string,
+    @Req() req: any,
+    @Body() body: GetMediaDto,
+  ) {
+    try {
+      const profile = await this.getUserProfile(req.account.id);
+
+      await this.validateGroupMembership(profile.id, groupId);
+
+      const messageType = body.type || MediaMessageType.IMAGE;
+      const limit = body.limit || 10;
+
+      const mediaData = await this.chatService.getMediaByType(
+        groupId,
+        profile.id,
+        messageType,
+        limit,
+        body.cursor,
+      );
+
+      return this.createSuccessResponse(mediaData);
+    } catch (error) {
+      return this.createErrorResponse(error);
     }
   }
 }

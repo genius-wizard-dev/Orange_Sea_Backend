@@ -7,6 +7,7 @@ import {
 import { MessageType } from '@prisma/client';
 import { CloudinaryService } from 'src/config/cloudinary/cloudinary.service';
 import { PrismaService } from 'src/config/prisma/prisma.service';
+import { MediaMessageType } from '../dto/get.media.dto';
 
 @Injectable()
 export class ChatService {
@@ -21,14 +22,10 @@ export class ChatService {
     file: Express.Multer.File,
     type: MessageType,
   ): Promise<{ url: string; fileSize: number; originalName: string }> {
-    // Fix Vietnamese filename encoding issues
     let originalName = file.originalname;
 
-    // Try to normalize the filename if it's incorrectly encoded
     try {
-      // Check if filename has incorrect encoding (like "NhÃ³m" instead of "Nhóm")
       if (/Ã/.test(originalName)) {
-        // Try to decode and re-normalize
         const decodedName = Buffer.from(originalName, 'latin1').toString(
           'utf8',
         );
@@ -37,7 +34,6 @@ export class ChatService {
       }
     } catch (e) {
       this.logger.warn(`Error normalizing filename: ${e.message}`);
-      // Keep original if error occurs
     }
 
     this.logger.debug(
@@ -737,5 +733,85 @@ export class ChatService {
     });
 
     return lastMessage?.id === messageId;
+  }
+
+  async getMediaByType(
+    groupId: string,
+    profileId: string,
+    messageType: MediaMessageType,
+    limit = 10,
+    cursor?: string,
+  ) {
+    this.logger.debug(
+      `Fetching ${messageType} media for group ${groupId}, limit: ${limit}, cursor: ${cursor || 'none'}`,
+    );
+
+    try {
+      const queryOptions: any = {
+        where: {
+          groupId,
+          type: messageType,
+          deletedBy: {
+            none: {
+              userId: profileId,
+            },
+          },
+          isRecalled: false,
+        },
+        orderBy: {
+          createdAt: 'desc',
+        },
+        take: limit,
+        select: {
+          id: true,
+          fileUrl: true,
+          fileSize: true,
+          fileName: true,
+          createdAt: true,
+          sender: {
+            select: {
+              id: true,
+              name: true,
+              avatar: true,
+            },
+          },
+        },
+      };
+
+      if (cursor) {
+        const cursorMessage = await this.prisma.message.findUnique({
+          where: { id: cursor },
+          select: { createdAt: true },
+        });
+
+        if (cursorMessage) {
+          queryOptions.where.createdAt = {
+            lt: cursorMessage.createdAt,
+          };
+        }
+      }
+
+      const mediaMessages = await this.prisma.message.findMany(queryOptions);
+
+      const nextCursor =
+        mediaMessages.length === limit
+          ? mediaMessages[mediaMessages.length - 1].id
+          : null;
+
+      this.logger.debug(
+        `Retrieved ${mediaMessages.length} ${messageType} media items for group ${groupId}, nextCursor: ${nextCursor || 'none'}`,
+      );
+
+      return {
+        media: mediaMessages,
+        nextCursor,
+        hasMore: mediaMessages.length === limit,
+      };
+    } catch (error) {
+      this.logger.error(
+        `Error fetching ${messageType} media for group ${groupId}: ${error.message}`,
+      );
+      throw error;
+    }
   }
 }

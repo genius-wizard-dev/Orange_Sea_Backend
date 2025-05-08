@@ -1,24 +1,17 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { CloudinaryService } from 'src/config/cloudinary/cloudinary.service';
 import { PrismaService } from 'src/config/prisma/prisma.service';
+import { ProfileService } from 'src/profile/profile.service';
 
 @Injectable()
 export class GroupService {
   private readonly logger = new Logger(GroupService.name);
 
-  constructor(private readonly prismaService: PrismaService) {}
-
-  // Helper method to get profile from account ID
-  async getProfileFromAccountId(accountId: string) {
-    const profile = await this.prismaService.profile.findUnique({
-      where: { accountId: accountId },
-    });
-
-    if (!profile) {
-      throw new NotFoundException('Profile not found');
-    }
-
-    return profile;
-  }
+  constructor(
+    private readonly prismaService: PrismaService,
+    private readonly profileService: ProfileService,
+    private readonly cloudinaryService: CloudinaryService,
+  ) {}
 
   async createGroup(
     accountId: string,
@@ -37,7 +30,8 @@ export class GroupService {
         throw new Error('One or more participants do not exist');
       }
 
-      const profile = await this.getProfileFromAccountId(accountId);
+      const profile =
+        await this.profileService.getProfileFromAccountId(accountId);
       if (!profile) {
         throw new NotFoundException('Profile not found');
       }
@@ -107,7 +101,8 @@ export class GroupService {
         throw new Error('Group not found');
       }
 
-      const profile = await this.getProfileFromAccountId(accountId);
+      const profile =
+        await this.profileService.getProfileFromAccountId(accountId);
       const userId = profile.id;
 
       const requester = group.participants.find((p) => p.userId === userId);
@@ -179,7 +174,8 @@ export class GroupService {
         throw new Error('Group not found');
       }
 
-      const profile = await this.getProfileFromAccountId(accountId);
+      const profile =
+        await this.profileService.getProfileFromAccountId(accountId);
       const userId = profile.id;
 
       const requester = group.participants.find((p) => p.userId === userId);
@@ -274,7 +270,8 @@ export class GroupService {
         throw new Error('Group not found');
       }
 
-      const profile = await this.getProfileFromAccountId(accountId);
+      const profile =
+        await this.profileService.getProfileFromAccountId(accountId);
       const userId = profile.id;
 
       if (group.ownerId !== userId) {
@@ -293,7 +290,8 @@ export class GroupService {
 
   async getGroupByAccountId(accountId: string) {
     try {
-      const profile = await this.getProfileFromAccountId(accountId);
+      const profile =
+        await this.profileService.getProfileFromAccountId(accountId);
       const userId = profile.id;
 
       return this.prismaService.group.findMany({
@@ -449,7 +447,8 @@ export class GroupService {
         throw new NotFoundException('Group not found');
       }
 
-      const profile = await this.getProfileFromAccountId(accountId);
+      const profile =
+        await this.profileService.getProfileFromAccountId(accountId);
       if (!profile) {
         throw new NotFoundException('Profile not found');
       }
@@ -468,7 +467,8 @@ export class GroupService {
 
   async searchGroups(accountId: string, searchTerm: string) {
     try {
-      const profile = await this.getProfileFromAccountId(accountId);
+      const profile =
+        await this.profileService.getProfileFromAccountId(accountId);
       const userId = profile.id;
 
       return this.prismaService.group.findMany({
@@ -510,7 +510,8 @@ export class GroupService {
   }
   async getGroupInfo(groupId: string, accountId: string) {
     try {
-      const profile = await this.getProfileFromAccountId(accountId);
+      const profile =
+        await this.profileService.getProfileFromAccountId(accountId);
       const userId = profile.id;
       const isMember = await this.isGroupMember(userId, groupId);
       if (!isMember) {
@@ -560,7 +561,8 @@ export class GroupService {
         throw new Error('You cannot leave a direct message conversation');
       }
 
-      const profile = await this.getProfileFromAccountId(accountId);
+      const profile =
+        await this.profileService.getProfileFromAccountId(accountId);
       const userId = profile.id;
 
       // Find the participant
@@ -620,7 +622,8 @@ export class GroupService {
         throw new Error('Ownership transfer is only available for group chats');
       }
 
-      const profile = await this.getProfileFromAccountId(accountId);
+      const profile =
+        await this.profileService.getProfileFromAccountId(accountId);
       const userId = profile.id;
 
       // Check if requester is the current owner
@@ -701,7 +704,8 @@ export class GroupService {
         throw new Error('Renaming is only available for group chats');
       }
 
-      const profile = await this.getProfileFromAccountId(accountId);
+      const profile =
+        await this.profileService.getProfileFromAccountId(accountId);
       const userId = profile.id;
 
       // Check if requester is the current owner
@@ -730,6 +734,104 @@ export class GroupService {
       };
     } catch (error) {
       this.logger.error(`Error renaming group: ${error.message}`, error.stack);
+      throw error;
+    }
+  }
+
+  async updateGroupAvatar(
+    groupId: string,
+    accountId: string,
+    file: Express.Multer.File,
+  ) {
+    try {
+      const group = await this.prismaService.group.findUnique({
+        where: { id: groupId },
+        include: {
+          participants: true,
+        },
+      });
+
+      if (!group) {
+        throw new NotFoundException('Không tìm thấy nhóm');
+      }
+
+      // Chỉ cho phép cập nhật avatar cho group, không cho phép đối với chat 2 người
+      if (!group.isGroup) {
+        throw new Error(
+          'Chỉ có thể cập nhật avatar cho nhóm, không áp dụng cho đoạn chat 2 người',
+        );
+      }
+
+      const profile =
+        await this.profileService.getProfileFromAccountId(accountId);
+      const userId = profile.id;
+
+      // Kiểm tra xem người dùng có phải là chủ sở hữu không
+      const requester = group.participants.find((p) => p.userId === userId);
+      if (!requester || requester.role !== 'OWNER') {
+        throw new Error('Chỉ chủ sở hữu mới có thể cập nhật avatar của nhóm');
+      }
+
+      if (!file) {
+        throw new Error('Không tìm thấy file ảnh');
+      }
+
+      // Upload ảnh mới lên Cloudinary
+      const filename = `group_${groupId}`;
+      this.logger.debug(`Đang tải lên avatar mới với tên file: ${filename}`);
+
+      // Upload ảnh lên Cloudinary với tên cố định
+      const uploadResult =
+        await this.cloudinaryService.uploadBufferToCloudinary(
+          file.buffer,
+          filename,
+          'group-avatars',
+        );
+
+      // Lấy URL từ kết quả
+      const avatarUrl = uploadResult.url;
+
+      this.logger.debug(`Tải lên avatar thành công, URL: ${avatarUrl}`);
+
+      try {
+        // Cập nhật avatar của nhóm
+        const updatedGroup = await this.prismaService.$transaction(
+          async (tx) => {
+            return tx.group.update({
+              where: { id: groupId },
+              data: {
+                avatar: avatarUrl,
+              },
+              include: {
+                participants: {
+                  include: {
+                    user: true,
+                  },
+                },
+              },
+            });
+          },
+        );
+
+        return {
+          statusCode: 200,
+          message: 'Cập nhật avatar nhóm thành công',
+          data: updatedGroup,
+        };
+      } catch (prismaError) {
+        this.logger.error(
+          `Lỗi Prisma khi cập nhật avatar: ${prismaError.message}`,
+          prismaError.stack,
+        );
+        throw new Error(
+          `Không thể cập nhật avatar nhóm trong cơ sở dữ liệu: ${prismaError.message}`,
+        );
+      }
+    } catch (error) {
+      this.logger.error(
+        `Lỗi cập nhật avatar nhóm: ${error.message}`,
+        error.stack,
+      );
       throw error;
     }
   }

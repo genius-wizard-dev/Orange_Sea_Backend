@@ -13,6 +13,7 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import {
   ApiBearerAuth,
+  ApiBody,
   ApiConsumes,
   ApiOperation,
   ApiResponse,
@@ -21,15 +22,15 @@ import {
 import { JwtAuthGuard } from '../auth/guards/auth.guard';
 import { UpdateProfileDTO } from './dto/update.profile.dto';
 import { ProfileService } from './profile.service';
-@ApiTags('profile')
+@ApiTags('Profile')
 @Controller('profile')
+@ApiBearerAuth('JWT-auth')
 export class ProfileController {
   private readonly logger = new Logger(ProfileController.name);
   constructor(private readonly profileService: ProfileService) {}
 
   @UseGuards(JwtAuthGuard)
   @Get('me')
-  @ApiBearerAuth()
   @ApiOperation({ summary: 'Lấy thông tin profile của người dùng hiện tại' })
   @ApiResponse({ status: 200, description: 'Lấy thông tin thành công' })
   @ApiResponse({ status: 401, description: 'Không có quyền truy cập' })
@@ -59,10 +60,10 @@ export class ProfileController {
   @Put('me')
   @UseInterceptors(FileInterceptor('avatar'))
   @ApiConsumes('multipart/form-data')
-  @ApiBearerAuth()
   @ApiOperation({ summary: 'Cập nhật profile của người dùng hiện tại' })
   @ApiResponse({ status: 200, description: 'Cập nhật thành công' })
   @ApiResponse({ status: 401, description: 'Không có quyền truy cập' })
+  @ApiBody({ type: UpdateProfileDTO })
   async updateMyProfile(
     @Req() req: any,
     @Body() updateProfileDTO: UpdateProfileDTO,
@@ -101,7 +102,6 @@ export class ProfileController {
 
   @UseGuards(JwtAuthGuard)
   @Get(':id')
-  @ApiBearerAuth()
   @ApiOperation({ summary: 'Lấy thông tin profile theo ID' })
   @ApiResponse({ status: 200, description: 'Lấy thông tin thành công' })
   @ApiResponse({ status: 401, description: 'Không có quyền truy cập' })
@@ -128,7 +128,6 @@ export class ProfileController {
 
   @UseGuards(JwtAuthGuard)
   @Get('username/:username')
-  @ApiBearerAuth()
   @ApiOperation({ summary: 'Tìm kiếm profile theo username' })
   @ApiResponse({ status: 200, description: 'Tìm kiếm thành công' })
   @ApiResponse({ status: 401, description: 'Không có quyền truy cập' })

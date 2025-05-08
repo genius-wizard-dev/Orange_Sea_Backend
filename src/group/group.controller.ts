@@ -10,10 +10,15 @@ import {
   Post,
   Put,
   Request,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import {
   ApiBearerAuth,
+  ApiBody,
+  ApiConsumes,
   ApiOperation,
   ApiParam,
   ApiResponse,
@@ -21,11 +26,16 @@ import {
 } from '@nestjs/swagger';
 
 import { JwtAuthGuard } from 'src/auth/guards/auth.guard';
-import { AddParticipantDto, CreateGroupDto, GroupResponseDto } from './dto';
+import {
+  AddParticipantDto,
+  CreateGroupDto,
+  GroupResponseDto,
+  UpdateGroupAvatarDto,
+} from './dto';
 import { GroupService } from './group.service';
 
 @ApiTags('Group')
-@ApiBearerAuth()
+@ApiBearerAuth('JWT-auth')
 @Controller('group')
 export class GroupController {
   private readonly logger = new Logger(GroupController.name);
@@ -313,6 +323,48 @@ export class GroupController {
       return {
         statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
         message: error.message || 'Đã xảy ra lỗi khi đổi tên nhóm',
+      };
+    }
+  }
+
+  @Put(':groupId/avatar')
+  @UseGuards(JwtAuthGuard)
+  @UseInterceptors(FileInterceptor('avatar'))
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({ summary: 'Cập nhật avatar nhóm' })
+  @ApiParam({ name: 'groupId', description: 'ID của nhóm' })
+  @ApiBody({ type: UpdateGroupAvatarDto })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Avatar nhóm đã được cập nhật thành công',
+  })
+  @ApiResponse({
+    status: HttpStatus.BAD_REQUEST,
+    description:
+      'Không thể cập nhật avatar nhóm (không phải nhóm hoặc bạn không phải chủ nhóm)',
+  })
+  async updateGroupAvatar(
+    @Request() req,
+    @Param('groupId') groupId: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    try {
+      const accountId = req.account.id;
+      if (!file) {
+        return {
+          statusCode: HttpStatus.BAD_REQUEST,
+          message: 'Vui lòng chọn ảnh avatar cho nhóm',
+        };
+      }
+      return this.groupService.updateGroupAvatar(groupId, accountId, file);
+    } catch (error: any) {
+      this.logger.error(
+        `Lỗi cập nhật avatar nhóm: ${error.message}`,
+        error.stack,
+      );
+      return {
+        statusCode: HttpStatus.BAD_REQUEST,
+        message: error.message || 'Đã xảy ra lỗi khi cập nhật avatar nhóm',
       };
     }
   }
