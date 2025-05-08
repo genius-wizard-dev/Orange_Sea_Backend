@@ -17,7 +17,7 @@ import {
 import { JwtAuthGuard } from 'src/auth/guards/auth.guard';
 import { AccountService } from './account.service';
 import { UpdatePasswordDTO } from './dto/update.account.dto';
-@ApiTags('account')
+@ApiTags('Account')
 @Controller('account')
 export class AccountController {
   private readonly logger = new Logger(AccountController.name);
@@ -25,7 +25,7 @@ export class AccountController {
 
   @Get(':id')
   @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Lấy thông tin tài khoản theo ID' })
   @ApiResponse({
     status: 200,
@@ -43,7 +43,7 @@ export class AccountController {
 
   @Get('username/:username')
   @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Lấy thông tin tài khoản theo username' })
   @ApiResponse({
     status: 200,
@@ -61,7 +61,7 @@ export class AccountController {
 
   @Put(':id/password')
   @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Cập nhật mật khẩu tài khoản' })
   @ApiResponse({ status: 200, description: 'Cập nhật mật khẩu thành công' })
   async updatePassword(
@@ -97,7 +97,7 @@ export class AccountController {
 
   // @Delete(':id')
   // @UseGuards(JwtAuthGuard)
-  // @ApiBearerAuth()
+  //   @ApiBearerAuth('JWT-auth')
   // @ApiOperation({ summary: 'Xóa tài khoản' })
   // @ApiResponse({ status: 200, description: 'Xóa tài khoản thành công' })
   // async deleteAccount(@Param('id') id: string, @Req() req: any) {

@@ -29,8 +29,8 @@ import {
 } from './dto';
 import { FriendshipService } from './friend.service';
 
-@ApiTags('friends')
-@ApiBearerAuth()
+@ApiTags('Friend')
+@ApiBearerAuth('JWT-auth')
 @Controller('friend')
 export class FriendshipController {
   private readonly logger = new Logger(FriendshipController.name);
@@ -296,7 +296,4 @@ export class FriendshipController {
       );
     }
   }
-
-  
-
 }

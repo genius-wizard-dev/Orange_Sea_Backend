@@ -57,12 +57,12 @@ export class UpdateProfileDTO {
   gender?: Gender;
 
   @ApiProperty({
-    description: 'URL ảnh đại diện',
+    type: 'string',
+    format: 'binary',
+    description: 'Ảnh đại diện (file upload)',
     required: false,
   })
-  @IsString()
-  @IsOptional()
-  avatar?: string;
+  avatar?: any;
 
   @ApiProperty({
     description: 'Ngày sinh (định dạng ISO)',
