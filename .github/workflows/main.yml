@@ -1,4 +1,4 @@
-name: CI/CD Pipeline
+name: NestJS CI/CD
 
 on:
   push:
@@ -66,7 +66,8 @@ jobs:
           push: true
           tags: nguyenthanhthuan/orange_sea_backend:latest
 
-  deploy:
+  deploy-to-server:
+    name: Deploy to server via SSH
     needs: build-and-push
     runs-on: ubuntu-latest
 
@@ -88,4 +89,13 @@ jobs:
             cd /home/
             docker compose pull
             docker compose up -d --build
+            echo "Kiểm tra trạng thái container:"
+            docker ps
+            if docker ps | grep -q "orange_sea_backend"; then
+              echo "✅ Container đã được triển khai thành công!"
+            else
+              echo "❌ Container không chạy được. Kiểm tra logs..."
+              docker logs $(docker ps -a --filter "ancestor=nguyenthanhthuan/orange_sea_backend:latest" --format "{{.ID}}")
+              exit 1
+            fi
           EOF
