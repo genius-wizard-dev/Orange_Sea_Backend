@@ -7,7 +7,7 @@ import { ProfileModule } from 'src/profile/profile.module';
 import { TokenModule } from 'src/token/token.module';
 import { ChatController } from './chat.controller';
 import { ChatGateway } from './chat.gateway';
-import { ChatService } from './services/chat.service';
+import { ChatService } from './chat.service';
 
 @Module({
   imports: [

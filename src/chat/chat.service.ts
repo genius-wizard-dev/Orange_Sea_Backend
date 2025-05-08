@@ -7,7 +7,7 @@ import {
 import { MessageType } from '@prisma/client';
 import { CloudinaryService } from 'src/config/cloudinary/cloudinary.service';
 import { PrismaService } from 'src/config/prisma/prisma.service';
-import { MediaMessageType } from '../dto/get.media.dto';
+import { MediaMessageType } from './dto/get.media.dto';
 
 @Injectable()
 export class ChatService {
