@@ -77,7 +77,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
           profileId,
           isActive: false,
           groupId: activeGroupId,
-          isOnline: false, // Will be updated if user has other connections
+          isOnline: false,
         });
       }
 

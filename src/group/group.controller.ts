@@ -26,6 +26,7 @@ import {
 } from '@nestjs/swagger';
 
 import { JwtAuthGuard } from 'src/auth/guards/auth.guard';
+import { ProfileService } from 'src/profile/profile.service';
 import {
   AddParticipantDto,
   CreateGroupDto,
@@ -39,7 +40,10 @@ import { GroupService } from './group.service';
 @Controller('group')
 export class GroupController {
   private readonly logger = new Logger(GroupController.name);
-  constructor(private readonly groupService: GroupService) {}
+  constructor(
+    private readonly groupService: GroupService,
+    private readonly profileService: ProfileService,
+  ) {}
 
   @Post()
   @UseGuards(JwtAuthGuard)
@@ -284,7 +288,15 @@ export class GroupController {
   async getGroupInfo(@Request() req: any, @Param('groupId') groupId: string) {
     try {
       const accountId = req.account.id;
-      return this.groupService.getGroupInfo(groupId, accountId);
+      const profile =
+        await this.profileService.getProfileFromAccountId(accountId);
+      if (!profile) {
+        return {
+          statusCode: HttpStatus.BAD_REQUEST,
+          message: 'Người dùng không tồn tại',
+        };
+      }
+      return this.groupService.getGroupInfo(groupId, profile.id);
     } catch (error: any) {
       return {
         statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
