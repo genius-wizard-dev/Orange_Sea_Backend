@@ -512,10 +512,9 @@ export class GroupService {
       throw error;
     }
   }
-  async getGroupInfo(groupId: string, accountId: string) {
+  async getGroupInfo(groupId: string, profileId: string) {
     try {
-      const profile =
-        await this.profileService.getProfileFromAccountId(accountId);
+      const profile = await this.profileService.getProfileById(profileId);
       const userId = profile.id;
       const isMember = await this.isGroupMember(userId, groupId);
       if (!isMember) {
