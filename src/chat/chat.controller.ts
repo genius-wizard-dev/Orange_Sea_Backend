@@ -301,18 +301,18 @@ export class ChatController {
   async forwardMessage(@Body() data: ForwardMessageDto, @Req() req: any) {
     try {
       const profile = await this.getUserProfile(req.account.id);
-      const { messageId, targetGroupId } = data;
+      const { messageId, groupId } = data;
 
       // Xác thực tin nhắn và quyền truy cập
       const message = await this.validateMessageAccess(messageId, profile.id);
 
       // Xác thực quyền truy cập vào nhóm đích
-      await this.validateGroupMembership(profile.id, targetGroupId);
+      await this.validateGroupMembership(profile.id, groupId);
 
       // Chuyển tiếp tin nhắn
       const forwardedMessage = await this.chatService.forwardMessage(
         messageId,
-        targetGroupId,
+        groupId,
         profile.id,
       );
 
