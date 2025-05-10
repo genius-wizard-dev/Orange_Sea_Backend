@@ -649,6 +649,22 @@ export class ChatService {
         );
       }
 
+      const participant = await this.prisma.participant.findUnique({
+        where: {
+          userId_groupId: {
+            userId: senderId,
+            groupId: targetGroupId,
+          },
+        },
+      });
+
+      if (!participant) {
+        throw new ForbiddenException(
+          'Người dùng không phải là thành viên của nhóm chat đích',
+        );
+      }
+
+      // Tạo tin nhắn chuyển tiếp
       const forwardedMessage = await this.prisma.message.create({
         data: {
           senderId,
@@ -656,8 +672,24 @@ export class ChatService {
           type: originalMessage.type,
           content: originalMessage.content,
           fileUrl: originalMessage.fileUrl,
+          fileSize: originalMessage.fileSize,
+          fileName: originalMessage.fileName,
           readBy: {
             create: [{ userId: senderId }],
+          },
+        },
+        include: {
+          readBy: {
+            select: {
+              userId: true,
+            },
+          },
+          sender: {
+            select: {
+              id: true,
+              name: true,
+              avatar: true,
+            },
           },
         },
       });
