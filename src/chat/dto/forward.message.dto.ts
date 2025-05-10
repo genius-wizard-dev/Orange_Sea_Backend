@@ -16,5 +16,5 @@ export class ForwardMessageDto {
   })
   @IsString()
   @IsNotEmpty()
-  targetGroupId: string;
+  groupId: string;
 }
