@@ -1,3 +1,4 @@
+import { faker } from '@faker-js/faker';
 import { ApiProperty } from '@nestjs/swagger';
 import { Role } from '@prisma/client';
 import {
@@ -9,9 +10,13 @@ import {
   Length,
   Matches,
 } from 'class-validator';
-
 export class RegisterDTO {
-  @ApiProperty({ description: 'Tên đăng nhập', minLength: 5, maxLength: 50 })
+  @ApiProperty({
+    description: 'Tên đăng nhập',
+    minLength: 5,
+    maxLength: 50,
+    example: faker.internet.username(),
+  })
   @IsString()
   @Length(5, 50)
   username: string;
@@ -20,12 +25,22 @@ export class RegisterDTO {
     description: 'Địa chỉ email',
     minLength: 5,
     maxLength: 50,
+    example: faker.internet.email(),
   })
   @IsEmail()
   @Length(5, 50)
   email: string;
 
-  @ApiProperty({ description: 'Mật khẩu', minLength: 5, maxLength: 50 })
+  @ApiProperty({
+    description: 'Mật khẩu',
+    minLength: 6,
+    maxLength: 50,
+    example: faker.internet.password({
+      length: 10,
+      pattern: /[A-Za-z0-9!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/,
+      prefix: 'Abc1!',
+    }),
+  })
   @IsNotEmpty()
   @IsString()
   @Length(6, 50)
@@ -42,6 +57,7 @@ export class RegisterDTO {
     description: 'Vai trò của người dùng',
     enum: Role,
     default: Role.USER,
+    example: Role.USER,
   })
   @IsEnum(Role)
   @IsOptional()
@@ -51,21 +67,25 @@ export class RegisterDTO {
 export class RegisterResponseDTO {
   @ApiProperty({
     description: 'ID của tài khoản',
+    example: faker.database.mongodbObjectId(),
   })
   accountId: string;
 
   @ApiProperty({
     description: 'Tên đăng nhập',
+    example: faker.internet.username(),
   })
   username: string;
 
   @ApiProperty({
     description: 'Địa chỉ email',
+    example: faker.internet.email(),
   })
   email: string;
 
   @ApiProperty({
     description: 'ID của profile',
+    example: faker.database.mongodbObjectId(),
   })
   profileId: string;
 }
@@ -73,6 +93,7 @@ export class RegisterResponseDTO {
 export class RegisterResponse {
   @ApiProperty({
     description: 'Địa chỉ email đã đăng ký',
+    example: faker.internet.email(),
   })
   email: string;
 
@@ -83,15 +104,9 @@ export class RegisterResponse {
   isPending: boolean;
 
   @ApiProperty({
-    description: 'Thông báo kết quả',
-    required: false,
-    example: 'OTP đã được gửi thành công',
-  })
-  message?: string;
-  @ApiProperty({
     description: 'Key',
     required: false,
-    example: 'Gửi key',
+    example: faker.string.uuid(),
   })
   key?: string;
 }
@@ -101,25 +116,37 @@ export class RegisterPendingDataDTO extends RegisterDTO {
 }
 
 export class RegisterOtpVerifyDTO {
-  @ApiProperty({ description: 'Email đăng ký' })
+  @ApiProperty({
+    description: 'Email đăng ký',
+    example: faker.internet.email(),
+  })
   @IsEmail()
   email: string;
 
-  @ApiProperty({ description: 'Mã OTP' })
+  @ApiProperty({ description: 'Mã OTP', example: faker.string.uuid() })
   otp: string;
 }
 
-export class ResendOtpDto {
-  @ApiProperty({ description: 'Email đăng ký' })
+export class ResendOtpDTO {
+  @ApiProperty({
+    description: 'Email đăng ký',
+    example: faker.internet.email(),
+  })
   @IsEmail()
   email: string;
 }
 
 export class CheckRegister {
-  @ApiProperty({ description: 'Key xác thực' })
+  @ApiProperty({
+    description: 'Key xác thực',
+    example: 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4',
+  })
   key: string;
 
-  @ApiProperty({ description: 'Email đăng ký' })
+  @ApiProperty({
+    description: 'Email đăng ký',
+    example: faker.internet.email(),
+  })
   @IsEmail()
   email: string;
 }

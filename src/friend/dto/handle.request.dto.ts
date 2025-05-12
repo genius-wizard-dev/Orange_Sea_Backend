@@ -6,7 +6,7 @@ export enum FriendRequestAction {
   REJECT = 'REJECT',
 }
 
-export class HandleFriendRequestDto {
+export class HandleFriendRequestDTO {
   @ApiProperty({
     description: 'Hành động xử lý yêu cầu kết bạn',
     enum: FriendRequestAction,

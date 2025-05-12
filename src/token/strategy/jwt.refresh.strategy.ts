@@ -3,7 +3,7 @@ import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
 import { Request } from 'express';
 import { ExtractJwt, Strategy } from 'passport-jwt';
-import { ProfileService } from 'src/profile/profile.service';
+import { ProfileService } from 'src/profile/services/profile';
 import { JwtPayload } from '../interfaces/jwt.interface';
 import { TokenService } from '../token.service';
 // import { AuthService } from './auth.service';
@@ -31,8 +31,8 @@ export class JwtRefreshStrategy extends PassportStrategy(
       const deviceId = req.headers['x-device-id'] as string;
 
       await this.tokenService.verifyRefreshToken(refreshToken, deviceId);
-      const profile = await this.profileService.findByUsername(
-        payload.username,
+      const profile = await this.profileService.getProfileById(
+        payload.profileId,
       );
       if (!profile) {
         throw new UnauthorizedException('User does not exist');
@@ -42,7 +42,7 @@ export class JwtRefreshStrategy extends PassportStrategy(
         id: profile.id,
         username: profile.username,
         role: profile.role,
-        profileId: profile.profile.id,
+        profileId: profile.id,
       };
     } catch (error) {
       throw new UnauthorizedException(error.message);

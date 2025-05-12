@@ -8,292 +8,476 @@ import {
   Param,
   Post,
   Put,
-  Request,
+  Req,
+  Res,
   UseGuards,
 } from '@nestjs/common';
 import {
+  ApiBadRequestResponse,
   ApiBearerAuth,
-  ApiBody,
+  ApiOkResponse,
   ApiOperation,
-  ApiParam,
-  ApiResponse,
   ApiTags,
+  ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
+import { Response } from 'express';
 import { JwtAuthGuard } from 'src/auth/guards/auth.guard';
+import { ProfileService } from 'src/profile/services/profile';
+import { errorResponse, successResponse } from 'src/utils/api.response.factory';
 import {
-  CreateFriendshipDto,
+  SwaggerErrorResponse,
+  SwaggerSuccessResponse,
+} from 'src/utils/swagger.helper';
+import {
+  CheckFriendshipResponseDto,
+  CreateFriendshipDTO,
+  CreateFriendshipResponseDTO,
   FriendResponse,
-  FriendshipResponseDto,
-  HandleFriendRequestDto,
-  UserSearchResponseDto,
+  HandleFriendRequestDTO,
+  UserSearchResponseDTO,
 } from './dto';
-import { FriendshipService } from './friend.service';
+import { FriendshipService } from './services/friend';
 
 @ApiTags('Friend')
-@ApiBearerAuth('JWT-auth')
+@ApiBearerAuth('JWT-AUTH')
 @Controller('friend')
 export class FriendshipController {
   private readonly logger = new Logger(FriendshipController.name);
-  constructor(private readonly friendshipService: FriendshipService) {}
+  constructor(
+    private readonly friendshipService: FriendshipService,
+    private readonly profileService: ProfileService,
+  ) {}
 
-  @ApiOperation({ summary: 'Gửi yêu cầu kết bạn' })
-  @ApiResponse({
-    status: 201,
-    description: 'Yêu cầu kết bạn đã được gửi',
-    type: FriendshipResponseDto,
-  })
-  @ApiResponse({ status: 400, description: 'Yêu cầu không hợp lệ' })
-  @ApiResponse({ status: 401, description: 'Không được phép' })
-  @UseGuards(JwtAuthGuard)
   @Post()
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Gửi yêu cầu kết bạn' })
+  @ApiOkResponse({
+    description: 'Gửi yêu cầu kết bạn thành công',
+    type: SwaggerSuccessResponse(
+      'Send_Friend_Request',
+      'friend',
+      CreateFriendshipResponseDTO,
+    ),
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Không có quyền truy cập',
+    type: SwaggerErrorResponse(
+      HttpStatus.UNAUTHORIZED,
+      'Không có quyền truy cập',
+      'Send_Friend_Request',
+      'friend',
+    ),
+  })
+  @ApiBadRequestResponse({
+    description: 'Tìm kiếm profile thất bại',
+    type: SwaggerErrorResponse(
+      HttpStatus.BAD_REQUEST,
+      'Gửi yêu cầu kết bạn thất bại',
+      'Send_Friend_Request',
+      'friend',
+    ),
+  })
   async sendFriendRequest(
-    @Request() req: any,
-    @Body() data: CreateFriendshipDto,
+    @Req() req: any,
+    @Body() data: CreateFriendshipDTO,
+    @Res() res: Response,
   ) {
     try {
-      this.logger.log(`Sending friend request from account ${req.account.id}`);
-      return await this.friendshipService.sendFriendRequest(
-        req.account.id,
-        data,
+      const result = await this.friendshipService.sendFriendRequest(
+        req.account.profileId,
+        data.receiverId,
       );
+      return res
+        .status(HttpStatus.OK)
+        .send(successResponse(result, 'Gửi yêu cầu kết bạn thành công'));
     } catch (error) {
       this.logger.error(`Error sending friend request: ${error.message}`);
-      throw new HttpException(
-        error.message,
-        error.status || HttpStatus.INTERNAL_SERVER_ERROR,
-      );
+      return res
+        .status(HttpStatus.BAD_REQUEST)
+        .send(
+          errorResponse('Gửi yêu cầu kết bạn thất bại', 400, error.message),
+        );
     }
   }
 
-  @ApiOperation({ summary: 'Lấy danh sách yêu cầu kết bạn đã nhận' })
-  @ApiResponse({
-    status: 200,
-    description: 'Danh sách yêu cầu kết bạn đã nhận',
-    type: [FriendResponse],
-  })
-  @ApiResponse({ status: 401, description: 'Không được phép' })
   @UseGuards(JwtAuthGuard)
   @Get('requests/received')
-  async getReceivedRequests(@Request() req: any) {
+  @ApiOperation({ summary: 'Lấy danh sách yêu cầu kết bạn đã nhận' })
+  @ApiOkResponse({
+    description: 'Lấy danh sách yêu cầu kết bạn đã nhận thành công',
+    type: SwaggerSuccessResponse(
+      'Get_Received_Requests',
+      'friend',
+      FriendResponse,
+      true,
+    ),
+  })
+  @ApiBadRequestResponse({
+    description: 'Lấy danh sách yêu cầu kết bạn đã nhận thất bại',
+    type: SwaggerErrorResponse(
+      HttpStatus.BAD_REQUEST,
+      'Lấy danh sách yêu cầu kết bạn đã nhận thất bại',
+      'Get_Received_Requests',
+      'friend',
+    ),
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Không có quyền truy cập',
+    type: SwaggerErrorResponse(
+      HttpStatus.UNAUTHORIZED,
+      'Không có quyền truy cập',
+      'Get_Received_Requests',
+      'friend',
+    ),
+  })
+  async getReceivedRequests(@Req() req: any, @Res() res: Response) {
     try {
-      this.logger.log(
-        `Fetching received friend requests for account ${req.account.id}`,
+      const result = await this.friendshipService.getReceivedRequests(
+        req.account.profileId,
       );
-      return await this.friendshipService.getReceivedRequests(req.account.id);
+      return res
+        .status(HttpStatus.OK)
+        .send(
+          successResponse(
+            result,
+            'Lấy danh sách yêu cầu kết bạn đã nhận thành công',
+          ),
+        );
     } catch (error) {
       this.logger.error(`Error fetching received requests: ${error.message}`);
-      throw new HttpException(
-        error.message,
-        error.status || HttpStatus.INTERNAL_SERVER_ERROR,
-      );
+      return res
+        .status(HttpStatus.BAD_REQUEST)
+        .send(
+          errorResponse(
+            'Lấy danh sách yêu cầu kết bạn đã nhận thất bại',
+            400,
+            error.message,
+          ),
+        );
     }
   }
 
-  @ApiOperation({ summary: 'Lấy danh sách yêu cầu kết bạn đã gửi' })
-  @ApiResponse({
-    status: 200,
-    description: 'Danh sách yêu cầu kết bạn đã gửi',
-    type: [FriendResponse],
-  })
-  @ApiResponse({ status: 401, description: 'Không được phép' })
   @UseGuards(JwtAuthGuard)
   @Get('requests/sent')
-  async getSentRequests(@Request() req: any) {
+  @ApiOperation({ summary: 'Lấy danh sách yêu cầu kết bạn đã gửi' })
+  @ApiOkResponse({
+    description: 'Lấy danh sách yêu cầu kết bạn đã gửi thành công',
+    type: SwaggerSuccessResponse(
+      'Get_Sent_Requests',
+      'friend',
+      FriendResponse,
+      true,
+    ),
+  })
+  @ApiBadRequestResponse({
+    description: 'Lấy danh sách yêu cầu kết bạn đã gửi thất bại',
+    type: SwaggerErrorResponse(
+      HttpStatus.BAD_REQUEST,
+      'Lấy danh sách yêu cầu kết bạn đã gửi thất bại',
+      'Get_Sent_Requests',
+      'friend',
+    ),
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Không có quyền truy cập',
+    type: SwaggerErrorResponse(
+      HttpStatus.UNAUTHORIZED,
+      'Không có quyền truy cập',
+      'Get_Sent_Requests',
+      'friend',
+    ),
+  })
+  async getSentRequests(@Req() req: any, @Res() res: Response) {
     try {
-      this.logger.log(
-        `Fetching sending friend requests for account ${req.account.id}`,
+      const result = await this.friendshipService.getSendingRequests(
+        req.account.profileId,
       );
-      return await this.friendshipService.getSendingRequests(req.account.id);
+      return res
+        .status(HttpStatus.OK)
+        .send(
+          successResponse(
+            result,
+            'Lấy danh sách yêu cầu kết bạn đã gửi thành công',
+          ),
+        );
     } catch (error) {
       this.logger.error(`Error fetching sending requests: ${error.message}`);
-      throw new HttpException(
-        error.message,
-        error.status || HttpStatus.INTERNAL_SERVER_ERROR,
-      );
+      return res
+        .status(HttpStatus.BAD_REQUEST)
+        .send(
+          errorResponse(
+            'Lấy danh sách yêu cầu kết bạn đã gửi thất bại',
+            400,
+            error.message,
+          ),
+        );
     }
   }
 
-  @ApiOperation({ summary: 'Xử lý yêu cầu kết bạn' })
-  @ApiParam({
-    name: 'id',
-    description: 'ID của yêu cầu kết bạn',
-    example: 'profile-id',
-  })
-  @ApiBody({ type: HandleFriendRequestDto })
-  @ApiResponse({
-    status: 200,
-    description: 'Yêu cầu kết bạn đã được xử lý',
-    schema: {
-      type: 'object',
-      properties: {
-        status: { type: 'string', example: 'success' },
-        message: {
-          type: 'string',
-          example: 'Yêu cầu kết bạn đã được chấp nhận',
-        },
-      },
-    },
-  })
-  @ApiResponse({ status: 400, description: 'Yêu cầu không hợp lệ' })
-  @ApiResponse({ status: 401, description: 'Không được phép' })
   @UseGuards(JwtAuthGuard)
   @Put('requests/:id')
+  @ApiOperation({ summary: 'Xử lý yêu cầu kết bạn' })
+  @ApiOkResponse({
+    description: 'Xử lý yêu cầu kết bạn thành công',
+    type: SwaggerSuccessResponse(
+      'Handle_Friend_Request',
+      'friend',
+      CreateFriendshipResponseDTO,
+    ),
+  })
+  @ApiBadRequestResponse({
+    description: 'Xử lý yêu cầu kết bạn thất bại',
+    type: SwaggerErrorResponse(
+      HttpStatus.BAD_REQUEST,
+      'Xử lý yêu cầu kết bạn thất bại',
+      'Handle_Friend_Request',
+      'friend',
+    ),
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Không có quyền truy cập',
+    type: SwaggerErrorResponse(
+      HttpStatus.UNAUTHORIZED,
+      'Không có quyền truy cập',
+      'Handle_Friend_Request',
+      'friend',
+    ),
+  })
   async handleFriendRequest(
-    @Request() req: any,
-    @Param('id') id: string,
-    @Body() dto: HandleFriendRequestDto,
+    @Req() req: any,
+    @Param('id') friendShipId: string,
+    @Body() body: HandleFriendRequestDTO,
+    @Res() res: Response,
   ) {
-    if (!id) {
-      throw new HttpException('ID không hợp lệ', HttpStatus.BAD_REQUEST);
-    }
-    if (!['ACCEPT', 'REJECT'].includes(dto.action)) {
-      throw new HttpException('Hành động không hợp lệ', HttpStatus.BAD_REQUEST);
-    }
     try {
-      await this.friendshipService.handleFriendRequest(
-        id,
-        req.account.id,
-        dto.action,
+      if (!friendShipId) {
+        throw new HttpException('ID không hợp lệ', HttpStatus.BAD_REQUEST);
+      }
+      if (!['ACCEPT', 'REJECT'].includes(body.action)) {
+        throw new HttpException(
+          'Hành động không hợp lệ',
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      const result = await this.friendshipService.handleFriendRequest(
+        friendShipId,
+        req.account.profileId,
+        body.action,
       );
-      return {
-        status: 'success',
-        message: `Yêu cầu kết bạn đã được ${dto.action === 'ACCEPT' ? 'chấp nhận' : 'từ chối'}`,
-      };
+      return res
+        .status(HttpStatus.OK)
+        .send(
+          successResponse(
+            result,
+            `Yêu cầu kết bạn ${body.action === 'ACCEPT' ? 'đã được chấp nhận' : 'đã bị từ chối'}`,
+          ),
+        );
     } catch (error) {
       this.logger.error(`Error handling friend request: ${error.message}`);
-      throw new HttpException(
-        error.message,
-        error.status || HttpStatus.INTERNAL_SERVER_ERROR,
-      );
+      return res
+        .status(HttpStatus.BAD_REQUEST)
+        .send(
+          errorResponse('Xử lý yêu cầu kết bạn thất bại', 400, error.message),
+        );
     }
   }
 
-  @ApiOperation({ summary: 'Lấy danh sách bạn bè' })
-  @ApiResponse({
-    status: 200,
-    description: 'Danh sách bạn bè',
-    type: [FriendResponse],
-  })
-  @ApiResponse({ status: 401, description: 'Không được phép' })
   @UseGuards(JwtAuthGuard)
   @Get()
-  async getFriends(@Request() req: any) {
+  @ApiOperation({ summary: 'Lấy danh sách bạn bè' })
+  @ApiOkResponse({
+    description: 'Lấy danh sách bạn bè thành công',
+    type: SwaggerSuccessResponse('Get_Friends', 'friend', FriendResponse, true),
+  })
+  @ApiBadRequestResponse({
+    description: 'Lấy danh sách bạn bè thất bại',
+    type: SwaggerErrorResponse(
+      HttpStatus.BAD_REQUEST,
+      'Lấy danh sách bạn bè thất bại',
+      'Get_Friends',
+      'friend',
+    ),
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Không có quyền truy cập',
+    type: SwaggerErrorResponse(
+      HttpStatus.UNAUTHORIZED,
+      'Không có quyền truy cập',
+      'Get_Friends',
+      'friend',
+    ),
+  })
+  async getFriends(@Req() req: any, @Res() res: Response) {
     try {
-      this.logger.log(`Fetching friends for account ${req.account.id}`);
-      return await this.friendshipService.getFriends(req.account.id);
+      const result = await this.friendshipService.getFriends(
+        req.account.profileId,
+      );
+      return res
+        .status(HttpStatus.OK)
+        .send(successResponse(result, 'Lấy danh sách bạn bè thành công'));
     } catch (error) {
       this.logger.error(`Error fetching friends: ${error.message}`);
-      throw new HttpException(
-        error.message,
-        error.status || HttpStatus.INTERNAL_SERVER_ERROR,
-      );
+      return res
+        .status(HttpStatus.BAD_REQUEST)
+        .send(
+          errorResponse('Lấy danh sách bạn bè thất bại', 400, error.message),
+        );
     }
   }
 
-  @ApiOperation({ summary: 'Xóa mối quan hệ bạn bè' })
-  @ApiParam({
-    name: 'id',
-    description: 'ID của mối quan hệ bạn bè',
-    example: 'profile-id',
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'Mối quan hệ bạn bè đã được xóa',
-    schema: {
-      type: 'object',
-      properties: {
-        status: { type: 'string', example: 'success' },
-        message: { type: 'string', example: 'Mối quan hệ bạn bè đã được xóa' },
-      },
-    },
-  })
-  @ApiResponse({ status: 400, description: 'Yêu cầu không hợp lệ' })
-  @ApiResponse({ status: 401, description: 'Không được phép' })
   @UseGuards(JwtAuthGuard)
   @Put('delete/:id')
-  async deleteFriendship(@Request() req: any, @Param('id') id: string) {
+  @ApiOperation({ summary: 'Xóa mối quan hệ bạn bè' })
+  @ApiOkResponse({
+    description: 'Xóa mối quan hệ bạn bè thành công',
+    type: SwaggerSuccessResponse('Delete_Friendship', 'friend'),
+  })
+  @ApiBadRequestResponse({
+    description: 'Xóa mối quan hệ bạn bè thất bại',
+    type: SwaggerErrorResponse(
+      HttpStatus.BAD_REQUEST,
+      'Xóa mối quan hệ bạn bè thất bại',
+      'Delete_Friendship',
+      'friend',
+    ),
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Không có quyền truy cập',
+    type: SwaggerErrorResponse(
+      HttpStatus.UNAUTHORIZED,
+      'Không có quyền truy cập',
+      'Delete_Friendship',
+      'friend',
+    ),
+  })
+  async deleteFriendship(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Res() res: Response,
+  ) {
     try {
-      this.logger.log(
-        `Deleting friendship ${id} for account ${req.account.id}`,
-      );
-      await this.friendshipService.deleteFriendship(id, req.account.id);
-      return {
-        status: 'success',
-        message: 'Mối quan hệ bạn bè đã được xóa',
-      };
+      await this.friendshipService.deleteFriendship(id, req.account.profileId);
+      return res
+        .status(HttpStatus.OK)
+        .send(successResponse(null, 'Mối quan hệ bạn bè đã được xóa'));
     } catch (error) {
       this.logger.error(`Error deleting friendship: ${error.message}`);
-      throw new HttpException(
-        error.message,
-        error.status || HttpStatus.INTERNAL_SERVER_ERROR,
-      );
+      return res
+        .status(HttpStatus.BAD_REQUEST)
+        .send(
+          errorResponse('Xóa mối quan hệ bạn bè thất bại', 400, error.message),
+        );
     }
   }
 
-  @ApiOperation({ summary: 'Tìm kiếm người dùng' })
-  @ApiParam({
-    name: 'keyword',
-    description: 'Từ khóa tìm kiếm (tên người dùng hoặc số điện thoại)',
-    example: 'nguyen',
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'Danh sách người dùng tìm thấy',
-    type: [UserSearchResponseDto],
-  })
-  @ApiResponse({ status: 401, description: 'Không được phép' })
   @UseGuards(JwtAuthGuard)
   @Get('search/:keyword')
-  async searchUser(@Request() req: any, @Param('keyword') keyword: string) {
+  @ApiOperation({ summary: 'Tìm kiếm người dùng' })
+  @ApiOkResponse({
+    description: 'Tìm kiếm người dùng thành công',
+    type: SwaggerSuccessResponse(
+      'Search_User',
+      'friend',
+      UserSearchResponseDTO,
+      true,
+    ),
+  })
+  @ApiBadRequestResponse({
+    description: 'Tìm kiếm người dùng thất bại',
+    type: SwaggerErrorResponse(
+      HttpStatus.BAD_REQUEST,
+      'Tìm kiếm người dùng thất bại',
+      'Search_User',
+      'friend',
+    ),
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Không có quyền truy cập',
+    type: SwaggerErrorResponse(
+      HttpStatus.UNAUTHORIZED,
+      'Không có quyền truy cập',
+      'Search_User',
+      'friend',
+    ),
+  })
+  async searchUser(
+    @Req() req: any,
+    @Param('keyword') keyword: string,
+    @Res() res: Response,
+  ) {
     try {
-      this.logger.log(
-        `Searching for user ${keyword} for account ${req.account.id}`,
+      const result = await this.friendshipService.searchUser(
+        req.account.profileId,
+        keyword,
       );
-      return await this.friendshipService.searchUser(req.account.id, keyword);
+      return res
+        .status(HttpStatus.OK)
+        .send(successResponse(result, 'Tìm kiếm người dùng thành công'));
     } catch (error) {
       this.logger.error(`Error searching user: ${error.message}`);
-      throw new HttpException(
-        error.message,
-        error.status || HttpStatus.INTERNAL_SERVER_ERROR,
-      );
+      return res
+        .status(HttpStatus.BAD_REQUEST)
+        .send(
+          errorResponse('Tìm kiếm người dùng thất bại', 400, error.message),
+        );
     }
   }
 
-  @ApiOperation({ summary: 'Kiểm tra mối quan hệ bạn bè' })
-  @ApiParam({
-    name: 'profileId',
-    description: 'ID của profile cần kiểm tra mối quan hệ',
-    example: 'profile-id',
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'Trạng thái mối quan hệ bạn bè',
-    schema: {
-      type: 'object',
-      properties: {
-        isFriend: { type: 'boolean', example: true },
-      },
-    },
-  })
-  @ApiResponse({ status: 401, description: 'Không được phép' })
   @UseGuards(JwtAuthGuard)
   @Get('check/:profileId')
-  async isFriend(@Request() req: any, @Param('profileId') profileId: string) {
+  @ApiOperation({ summary: 'Kiểm tra mối quan hệ bạn bè' })
+  @ApiOkResponse({
+    description: 'Kiểm tra mối quan hệ bạn bè thành công',
+    type: SwaggerSuccessResponse(
+      'Check_Friendship',
+      'friend',
+      CheckFriendshipResponseDto,
+    ),
+  })
+  @ApiBadRequestResponse({
+    description: 'Kiểm tra mối quan hệ bạn bè thất bại',
+    type: SwaggerErrorResponse(
+      HttpStatus.BAD_REQUEST,
+      'Kiểm tra mối quan hệ bạn bè thất bại',
+      'Check_Friendship',
+      'friend',
+    ),
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Không có quyền truy cập',
+    type: SwaggerErrorResponse(
+      HttpStatus.UNAUTHORIZED,
+      'Không có quyền truy cập',
+      'Check_Friendship',
+      'friend',
+    ),
+  })
+  async isFriend(
+    @Req() req: any,
+    @Param('profileId') profileId: string,
+    @Res() res: Response,
+  ) {
     try {
-      this.logger.log(
-        `Checking friendship status with ${profileId} for account ${req.account.id}`,
-      );
       const isFriend = await this.friendshipService.isFriend(
-        req.account.id,
+        req.account.profileId,
         profileId,
       );
-      return { isFriend };
+      return res
+        .status(HttpStatus.OK)
+        .send(
+          successResponse(isFriend, 'Kiểm tra mối quan hệ bạn bè thành công'),
+        );
     } catch (error) {
       this.logger.error(`Error checking friendship status: ${error.message}`);
-      throw new HttpException(
-        error.message,
-        error.status || HttpStatus.INTERNAL_SERVER_ERROR,
-      );
+      return res
+        .status(HttpStatus.BAD_REQUEST)
+        .send(
+          errorResponse(
+            'Kiểm tra mối quan hệ bạn bè thất bại',
+            400,
+            error.message,
+          ),
+        );
     }
   }
 }

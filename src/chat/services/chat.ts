@@ -4,10 +4,11 @@ import {
   Injectable,
   Logger,
 } from '@nestjs/common';
-import { MessageType } from '@prisma/client';
+import { Message, MessageType } from '@prisma/client';
 import { CloudinaryService } from 'src/config/cloudinary/cloudinary.service';
 import { PrismaService } from 'src/config/prisma/prisma.service';
-import { MediaMessageType } from './dto/get.media.dto';
+import { MediaMessageType } from '../dto/get.media.dto';
+import { MessageIdResponseDTO } from '../dto/send.message.dto';
 
 @Injectable()
 export class ChatService {
@@ -88,92 +89,79 @@ export class ChatService {
     type: MessageType,
     readBy: string[] = [],
     file?: Express.Multer.File,
-  ): Promise<any> {
-    this.logger.log(
-      `Sending message from ${senderId} to group ${groupId}: ${content} with type ${type}`,
-    );
-    this.logger.debug(`Active readers: ${readBy.join(', ') || 'none'}`);
-
-    // Kiểm tra người dùng có trong group không trước khi gửi tin nhắn
-    const participant = await this.prisma.participant.findUnique({
-      where: {
-        userId_groupId: {
-          userId: senderId,
-          groupId: groupId,
+  ): Promise<MessageIdResponseDTO> {
+    try {
+      const participant = await this.prisma.participant.findUnique({
+        where: {
+          userId_groupId: {
+            userId: senderId,
+            groupId: groupId,
+          },
         },
-      },
-    });
+      });
 
-    if (!participant) {
-      this.logger.warn(`User ${senderId} is not a member of group ${groupId}`);
-      throw new ForbiddenException(
-        `Người dùng không phải là thành viên của nhóm chat này`,
+      if (!participant) {
+        this.logger.warn(
+          `User ${senderId} is not a member of group ${groupId}`,
+        );
+        throw new ForbiddenException(
+          `Người dùng không phải là thành viên của nhóm chat này`,
+        );
+      }
+
+      let fileUrl: string = '';
+      let fileSize: number = 0;
+      let fileName: string = '';
+
+      // Upload file if present
+      if (file) {
+        this.logger.debug(`Processing file upload for message type: ${type}`);
+
+        const fileResult = await this.uploadFileByType(file, type);
+        fileUrl = fileResult.url;
+        fileSize = fileResult.fileSize;
+        fileName = fileResult.originalName;
+      }
+
+      // Create read receipt data for sender and active readers
+      const readByData = [
+        { userId: senderId },
+        // Add other active readers
+        ...readBy.filter((id) => id !== senderId).map((userId) => ({ userId })),
+      ];
+
+      this.logger.debug(
+        `Creating message with read receipts for: ${readByData.map((item) => item.userId).join(', ')}`,
       );
-    }
 
-    let fileUrl: string = '';
-    let fileSize: number = 0;
-    let fileName: string = '';
+      const messageData = {
+        senderId,
+        groupId,
+        type,
+        content,
+        fileUrl: file ? fileUrl : null,
 
-    // Upload file if present
-    if (file) {
-      this.logger.debug(`Processing file upload for message type: ${type}`);
+        fileSize: file ? fileSize : null,
+        fileName: file ? fileName : null,
 
-      const fileResult = await this.uploadFileByType(file, type);
-      fileUrl = fileResult.url;
-      fileSize = fileResult.fileSize;
-      fileName = fileResult.originalName;
-    }
-
-    // Create read receipt data for sender and active readers
-    const readByData = [
-      { userId: senderId },
-      // Add other active readers
-      ...readBy.filter((id) => id !== senderId).map((userId) => ({ userId })),
-    ];
-
-    this.logger.debug(
-      `Creating message with read receipts for: ${readByData.map((item) => item.userId).join(', ')}`,
-    );
-
-    // Add file metadata to the message
-    const messageData = {
-      senderId,
-      groupId,
-      type,
-      content,
-      fileUrl: file ? fileUrl : null,
-      // Store file metadata if applicable
-      fileSize: file ? fileSize : null,
-      fileName: file ? fileName : null,
-      // Create read receipts for active users in the group
-      readBy: {
-        create: readByData,
-      },
-    };
-
-    const message = await this.prisma.message.create({
-      data: messageData,
-      include: {
         readBy: {
-          select: {
-            userId: true,
-          },
+          create: readByData,
         },
-        sender: {
-          select: {
-            id: true,
-            name: true,
-            avatar: true,
-          },
-        },
-      },
-    });
+      };
 
-    this.logger.debug(`Message created with ID: ${message.id}`);
-    this.logger.debug(`Read receipts created: ${message.readBy.length}`);
-
-    return message;
+      const message = await this.prisma.message.create({
+        data: messageData,
+      });
+      if (!message) {
+        throw new BadRequestException('Lỗi khi tạo tin nhắn');
+      }
+      return {
+        messageId: message.id,
+      };
+    } catch (error) {
+      this.logger.error(`Error sending message: ${error.message}`, error.stack);
+      throw error;
+    }
   }
 
   async markMessagesAsRead(userId: string, groupId: string) {
@@ -225,35 +213,35 @@ export class ChatService {
     };
   }
 
-  async getUnreadMessageCount(userId: string, groupId?: string) {
-    const where = {
-      readBy: {
-        none: {
-          userId,
-        },
-      },
-    };
+  // async getUnreadMessageCount(userId: string, groupId?: string) {
+  //   const where = {
+  //     readBy: {
+  //       none: {
+  //         userId,
+  //       },
+  //     },
+  //   };
 
-    if (groupId) {
-      where['groupId'] = groupId;
-      this.logger.debug(
-        `Getting unread message count for user ${userId} in group ${groupId}`,
-      );
-    } else {
-      this.logger.debug(
-        `Getting total unread message count for user ${userId}`,
-      );
-    }
+  //   if (groupId) {
+  //     where['groupId'] = groupId;
+  //     this.logger.debug(
+  //       `Getting unread message count for user ${userId} in group ${groupId}`,
+  //     );
+  //   } else {
+  //     this.logger.debug(
+  //       `Getting total unread message count for user ${userId}`,
+  //     );
+  //   }
 
-    const count = await this.prisma.message.count({
-      where,
-    });
+  //   const count = await this.prisma.message.count({
+  //     where,
+  //   });
 
-    this.logger.debug(`Unread message count: ${count}`);
-    return { count };
-  }
+  //   this.logger.debug(`Unread message count: ${count}`);
+  //   return { count };
+  // }
 
-  async getUnreadMessageCountsByGroups(userId: string) {
+  async getUnreadMessages(userId: string) {
     this.logger.debug(
       `Getting unread message counts by group for user ${userId}`,
     );
@@ -400,11 +388,9 @@ export class ChatService {
 
       const messages = await this.prisma.message.findMany(queryOptions);
 
-      // Get the next cursor (oldest message in the batch)
       const nextCursor =
         messages.length === limit ? messages[messages.length - 1].id : null;
 
-      // Format messages and their read receipts
       const formattedMessages = messages.map((message: any) => ({
         ...message,
         readBy: message.readBy.map((read) => read.userId),
@@ -417,62 +403,13 @@ export class ChatService {
       this.logger.debug(`Next cursor: ${nextCursor || 'none'}`);
       this.logger.debug(`Returning ${messages} messages`);
       return {
-        messages: formattedMessages.reverse(), // Return in chronological order
+        messages: formattedMessages.reverse(),
         nextCursor,
         hasMore: messages.length === limit,
       };
     } catch (error) {
       this.logger.error(
         `Error fetching paginated messages for group ${groupId}: ${error.message}`,
-      );
-      throw error;
-    }
-  }
-
-  async getMessageById(messageId: string, userId?: string) {
-    this.logger.debug(`Fetching message with ID: ${messageId}`);
-
-    try {
-      // Xây dựng điều kiện where dựa trên có userId hay không
-      const where: any = { id: messageId };
-
-      if (userId) {
-        // Sử dụng cách viết đúng cú pháp Prisma
-        where.NOT = {
-          deletedBy: {
-            some: {
-              userId,
-            },
-          },
-        };
-      }
-
-      const message = await this.prisma.message.findFirst({
-        where,
-        include: {
-          readBy: true,
-          sender: {
-            select: {
-              id: true,
-              name: true,
-              avatar: true,
-            },
-          },
-        },
-      });
-
-      if (!message) {
-        this.logger.warn(
-          `Message with ID ${messageId} not found or deleted by user`,
-        );
-        return null;
-      }
-
-      this.logger.debug(`Retrieved message with ID: ${messageId}`);
-      return message;
-    } catch (error) {
-      this.logger.error(
-        `Error fetching message with ID ${messageId}: ${error.message}`,
       );
       throw error;
     }
@@ -536,20 +473,27 @@ export class ChatService {
     }
   }
 
-  async recallMessage(messageId: string, userId: string) {
-    this.logger.debug(`Recalling message ${messageId} by user ${userId}`);
-
+  async recallMessage(
+    messageId: string,
+    profileId: string,
+  ): Promise<MessageIdResponseDTO> {
     try {
       // Kiểm tra tin nhắn tồn tại
       const message = await this.prisma.message.findUnique({
         where: { id: messageId },
+        include: {
+          sender: true,
+        },
       });
 
       if (!message) {
         throw new BadRequestException('Tin nhắn không tồn tại');
       }
 
-      // Kiểm tra thời gian giới hạn thu hồi (15 phút)
+      if (message.senderId !== profileId) {
+        throw new ForbiddenException('Bạn không có quyền thu hồi tin nhắn này');
+      }
+
       const messageTime = new Date(message.createdAt);
       const currentTime = new Date();
       const timeDiffInMinutes =
@@ -559,7 +503,6 @@ export class ChatService {
         throw new BadRequestException('Không thể thu hồi tin nhắn sau 15 phút');
       }
 
-      // Cập nhật trạng thái thu hồi tin nhắn
       const recalledMessage = await this.prisma.message.update({
         where: { id: messageId },
         data: {
@@ -568,7 +511,13 @@ export class ChatService {
         },
       });
 
-      return recalledMessage;
+      if (!recalledMessage) {
+        throw new BadRequestException('Lỗi khi thu hồi tin nhắn');
+      }
+
+      return {
+        messageId: recalledMessage.id,
+      };
     } catch (error) {
       this.logger.error(
         `Error recalling message ${messageId}: ${error.message}`,
@@ -577,44 +526,58 @@ export class ChatService {
     }
   }
 
-  async deleteMessage(messageId: string, accountId: string) {
-    this.logger.debug(`Deleting message ${messageId} for user ${accountId}`);
-
+  async deleteMessage(
+    messageId: string,
+    profileId: string,
+  ): Promise<MessageIdResponseDTO> {
     try {
-      // Kiểm tra tin nhắn tồn tại
-      const profile = await this.prisma.profile.findUnique({
-        where: { accountId },
-      });
-
-      if (!profile) {
-        throw new Error('Profile not found');
-      }
       const message = await this.prisma.message.findUnique({
         where: { id: messageId },
-        include: { deletedBy: true },
+        include: {
+          deletedBy: true,
+          group: {
+            include: {
+              participants: true,
+            },
+          },
+        },
       });
 
       if (!message) {
         throw new BadRequestException('Tin nhắn không tồn tại');
       }
 
-      // Kiểm tra người dùng đã xóa tin nhắn này chưa
+      const isGroupMember = message.group.participants.some(
+        (participant) => participant.userId === profileId,
+      );
+
+      if (!isGroupMember) {
+        throw new ForbiddenException(
+          'Bạn không có quyền truy cập tin nhắn này',
+        );
+      }
+
       const alreadyDeleted = message.deletedBy.some(
-        (del) => del.userId === profile.id,
+        (del) => del.userId === profileId,
       );
       if (alreadyDeleted) {
         throw new BadRequestException('Tin nhắn đã được xóa trước đó');
       }
 
-      // Cập nhật trạng thái xóa tin nhắn cho người dùng
-      await this.prisma.deletedMessage.create({
+      const deletedMessage = await this.prisma.deletedMessage.create({
         data: {
           messageId,
-          userId: profile.id,
+          userId: profileId,
         },
       });
 
-      return { success: true, message: 'Đã xóa tin nhắn thành công' };
+      if (!deletedMessage) {
+        throw new BadRequestException('Lỗi khi xóa tin nhắn');
+      }
+
+      return {
+        messageId: deletedMessage.id,
+      };
     } catch (error) {
       this.logger.error(
         `Error deleting message ${messageId}: ${error.message}`,
@@ -627,15 +590,18 @@ export class ChatService {
     messageId: string,
     targetGroupId: string,
     senderId: string,
-  ) {
-    this.logger.debug(
-      `Forwarding message ${messageId} to group ${targetGroupId} by user ${senderId}`,
-    );
-
+  ): Promise<MessageIdResponseDTO> {
     try {
-      // Lấy thông tin tin nhắn cần chuyển tiếp
+      // Tìm tin nhắn gốc kèm theo thông tin nhóm và người tham gia
       const originalMessage = await this.prisma.message.findUnique({
         where: { id: messageId },
+        include: {
+          group: {
+            include: {
+              participants: true,
+            },
+          },
+        },
       });
 
       if (!originalMessage) {
@@ -649,22 +615,39 @@ export class ChatService {
         );
       }
 
-      const participant = await this.prisma.participant.findUnique({
-        where: {
-          userId_groupId: {
-            userId: senderId,
-            groupId: targetGroupId,
-          },
-        },
-      });
+      // Kiểm tra người dùng có quyền đọc tin nhắn gốc không
+      const isGroupMember = originalMessage.group.participants.some(
+        (participant) => participant.userId === senderId,
+      );
 
-      if (!participant) {
+      if (!isGroupMember) {
         throw new ForbiddenException(
-          'Người dùng không phải là thành viên của nhóm chat đích',
+          'Bạn không có quyền truy cập tin nhắn này để chuyển tiếp',
         );
       }
 
-      // Tạo tin nhắn chuyển tiếp
+      // Kiểm tra người dùng có quyền gửi tin nhắn đến nhóm đích không
+      const targetGroup = await this.prisma.group.findUnique({
+        where: { id: targetGroupId },
+        include: {
+          participants: true,
+        },
+      });
+
+      if (!targetGroup) {
+        throw new BadRequestException('Nhóm đích không tồn tại');
+      }
+
+      const isTargetGroupMember = targetGroup.participants.some(
+        (participant) => participant.userId === senderId,
+      );
+
+      if (!isTargetGroupMember) {
+        throw new ForbiddenException(
+          'Bạn không có quyền gửi tin nhắn đến nhóm đích',
+        );
+      }
+
       const forwardedMessage = await this.prisma.message.create({
         data: {
           senderId,
@@ -672,29 +655,21 @@ export class ChatService {
           type: originalMessage.type,
           content: originalMessage.content,
           fileUrl: originalMessage.fileUrl,
-          fileSize: originalMessage.fileSize,
           fileName: originalMessage.fileName,
+          fileSize: originalMessage.fileSize,
           readBy: {
             create: [{ userId: senderId }],
           },
         },
-        include: {
-          readBy: {
-            select: {
-              userId: true,
-            },
-          },
-          sender: {
-            select: {
-              id: true,
-              name: true,
-              avatar: true,
-            },
-          },
-        },
       });
 
-      return forwardedMessage;
+      if (!forwardedMessage) {
+        throw new BadRequestException('Lỗi khi chuyển tiếp tin nhắn');
+      }
+
+      return {
+        messageId: forwardedMessage.id,
+      };
     } catch (error) {
       this.logger.error(
         `Error forwarding message ${messageId}: ${error.message}`,
@@ -745,9 +720,6 @@ export class ChatService {
     }
   }
 
-  /**
-   * Check if a message is the last message in a group
-   */
   async isLastMessageInGroup(
     messageId: string,
     groupId: string,
@@ -842,6 +814,28 @@ export class ChatService {
     } catch (error) {
       this.logger.error(
         `Error fetching ${messageType} media for group ${groupId}: ${error.message}`,
+      );
+      throw error;
+    }
+  }
+
+  async getMessageById(messageId: string): Promise<Message> {
+    try {
+      const message = await this.prisma.message.findUnique({
+        where: {
+          id: messageId,
+        },
+      });
+
+      if (!message) {
+        throw new BadRequestException('Tin nhắn không tồn tại');
+      }
+
+      return message;
+    } catch (error) {
+      this.logger.error(
+        `Error getting message by ID: ${error.message}`,
+        error.stack,
       );
       throw error;
     }

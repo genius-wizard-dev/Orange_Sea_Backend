@@ -1,24 +1,25 @@
+import { faker } from '@faker-js/faker';
 import { ApiProperty } from '@nestjs/swagger';
 import { IsDate, IsEmail, IsOptional, IsString } from 'class-validator';
 
 export class FriendResponse {
   @ApiProperty({
     description: 'ID của mối quan hệ bạn bè',
-    example: 'friendShip-id',
+    example: faker.database.mongodbObjectId(),
   })
   @IsString()
   id: string;
 
   @ApiProperty({
     description: 'ID của profile người dùng',
-    example: 'profile-id',
+    example: faker.database.mongodbObjectId(),
   })
   @IsString()
   profileId: string;
 
   @ApiProperty({
     description: 'Tên người dùng',
-    example: 'Nguyễn Văn A',
+    example: faker.person.fullName(),
     required: false,
     nullable: true,
   })
@@ -28,7 +29,7 @@ export class FriendResponse {
 
   @ApiProperty({
     description: 'URL hình đại diện của người dùng',
-    example: 'https://example.com/avatar.jpg',
+    example: faker.image.avatar(),
     required: false,
     nullable: true,
   })
@@ -38,7 +39,7 @@ export class FriendResponse {
 
   @ApiProperty({
     description: 'Thông tin giới thiệu',
-    example: 'Hello world',
+    example: faker.person.bio(),
     required: false,
     nullable: true,
   })
@@ -48,7 +49,7 @@ export class FriendResponse {
 
   @ApiProperty({
     description: 'Số điện thoại',
-    example: '0912345678',
+    example: `09${faker.string.numeric(8)}`,
     required: false,
     nullable: true,
   })
@@ -58,7 +59,7 @@ export class FriendResponse {
 
   @ApiProperty({
     description: 'Email người dùng',
-    example: 'example@gmail.com',
+    example: faker.internet.email(),
     required: false,
     nullable: true,
   })
@@ -68,7 +69,7 @@ export class FriendResponse {
 
   @ApiProperty({
     description: 'Ngày sinh',
-    example: '2000-01-01',
+    example: faker.date.birthdate({ min: 18, max: 65, mode: 'age' }),
     required: false,
     nullable: true,
   })

@@ -1,7 +1,6 @@
 import {
   Body,
   Controller,
-  HttpCode,
   HttpStatus,
   Logger,
   Post,
@@ -10,10 +9,12 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import {
+  ApiBadRequestResponse,
   ApiBearerAuth,
+  ApiOkResponse,
   ApiOperation,
-  ApiResponse,
   ApiTags,
+  ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import { Response } from 'express';
 import {
@@ -21,18 +22,26 @@ import {
   DeviceInfo,
 } from 'src/common/decorators/client-header.decorator';
 import { TokenService } from 'src/token/token.service';
+import { errorResponse, successResponse } from 'src/utils/api.response.factory';
+import {
+  SwaggerErrorResponse,
+  SwaggerSuccessResponse,
+} from 'src/utils/swagger.helper';
+
+import { GetProfileIdResponseDTO } from 'src/profile/dto/get.profile.dto';
 import { AuthService } from './auth.service';
 import { ForgotPasswordDTO, ResetPasswordDTO } from './dto/forgot.password.dto';
-import { LoginDTO } from './dto/login.dto';
+import { LoginDTO, LoginUserResponseDTO } from './dto/login.dto';
 import {
   CheckRegister,
   RegisterDTO,
   RegisterOtpVerifyDTO,
-  ResendOtpDto,
+  RegisterResponse,
+  RegisterResponseDTO,
+  ResendOtpDTO,
 } from './dto/register.dto';
 import { JwtAuthGuard } from './guards/auth.guard';
 import { JwtRefreshGuard } from './guards/jwt-refresh.guard';
-
 @ApiTags('Auth')
 @Controller('auth')
 export class AuthController {
@@ -43,157 +52,231 @@ export class AuthController {
   ) {}
 
   @Post('register')
-  @ApiOperation({ summary: 'Đăng ký tài khoản mới và gửi OTP' })
-  @ApiResponse({ status: 201, description: 'Gửi OTP thành công' })
-  @ApiResponse({ status: 409, description: 'Username hoặc email đã tồn tại' })
-  async register(@Body() registerDto: RegisterDTO, @Res() res: Response) {
+  @ApiOperation({ summary: 'Đăng ký tài khoản mới' })
+  @ApiOkResponse({
+    description: 'Đăng ký thành công',
+    type: SwaggerSuccessResponse('register', 'auth', RegisterResponse),
+  })
+  @ApiBadRequestResponse({
+    description: 'Đăng ký thất bại',
+    type: SwaggerErrorResponse(
+      HttpStatus.BAD_REQUEST,
+      'Đăng ký thất bại',
+      'register',
+      'auth',
+    ),
+  })
+  async register(@Body() registerDTO: RegisterDTO, @Res() res: Response) {
     try {
-      const result = await this.authService.register(registerDto);
-
-      return res.status(HttpStatus.OK).send({
-        status: 'success',
-        message: result.isPending
-          ? 'OTP đã được gửi và còn hiệu lực. Vui lòng kiểm tra email.'
-          : 'Email đã được gửi đến vui lòng cung cấp OTP để tiếp tục',
-        data: {
-          email: result.email,
-          isPending: result.isPending,
-          key: result.key,
-        },
-      });
+      const result = await this.authService.register(registerDTO);
+      return res
+        .status(HttpStatus.OK)
+        .send(successResponse(result, 'Đăng ký thành công'));
     } catch (error) {
-      return res.status(HttpStatus.BAD_REQUEST).send({
-        status: 'fail',
-        message: error.message,
-      });
+      return res
+        .status(HttpStatus.BAD_REQUEST)
+        .send(
+          errorResponse(
+            'Đăng ký thất bại',
+            HttpStatus.BAD_REQUEST,
+            error.message,
+          ),
+        );
     }
   }
 
   @Post('resend-otp')
   @ApiOperation({ summary: 'Gửi lại OTP sau 2 phút' })
-  @ApiResponse({ status: 200, description: 'Gửi lại OTP thành công' })
-  @ApiResponse({ status: 400, description: 'Không thể gửi lại OTP' })
-  async resendOTP(@Body() resendOtpDto: ResendOtpDto, @Res() res: Response) {
+  @ApiOkResponse({
+    description: 'OTP mới đã được gửi thành công',
+    type: SwaggerSuccessResponse('Resend_Otp', 'auth', ResendOtpDTO),
+  })
+  @ApiBadRequestResponse({
+    description: 'Gửi OTP thất bại',
+    type: SwaggerErrorResponse(
+      HttpStatus.BAD_REQUEST,
+      'Gửi OTP thất bại',
+      'Resend_Otp',
+      'auth',
+    ),
+  })
+  async resendOTP(@Body() resendOtpDTO: ResendOtpDTO, @Res() res: Response) {
     try {
-      const result = await this.authService.resendOTP(resendOtpDto.email);
-      return res.status(HttpStatus.OK).send({
-        status: 'success',
-        message: 'OTP mới đã được gửi thành công',
-        data: result,
-      });
+      const result = await this.authService.resendOTP(resendOtpDTO.email);
+      return res
+        .status(HttpStatus.OK)
+        .send(successResponse(result, 'OTP mới đã được gửi thành công'));
     } catch (error) {
-      return res.status(HttpStatus.BAD_REQUEST).send({
-        status: 'fail',
-        message: error.message,
-      });
+      return res
+        .status(HttpStatus.BAD_REQUEST)
+        .send(
+          errorResponse(
+            'Gửi OTP thất bại',
+            HttpStatus.BAD_REQUEST,
+            error.message,
+          ),
+        );
     }
   }
 
   @Post('is-register')
-  @ApiOperation({ summary: 'Xác thực OTP và hoàn tất đăng ký' })
-  @ApiResponse({ status: 200, description: 'Đăng ký thành công' })
-  @ApiResponse({ status: 400, description: 'OTP không hợp lệ hoặc hết hạn' })
+  @ApiOperation({ summary: 'Kiểm tra tình trạng đăng ký' })
+  @ApiOkResponse({
+    description: 'Kiểm tra tình trạng đăng ký thành công',
+    type: SwaggerSuccessResponse('Is_Register', 'auth'),
+  })
+  @ApiBadRequestResponse({
+    description: 'Kiểm tra tình trạng đăng ký thất bại',
+    type: SwaggerErrorResponse(
+      HttpStatus.BAD_REQUEST,
+      'Kiểm tra đăng ký thất bại',
+      'Is_Register',
+      'auth',
+    ),
+  })
   async checkRegister(@Res() res: any, @Body() body: CheckRegister) {
     try {
-      if (body) {
-        const key = body.key;
-        const email = body.email;
-        if (key && email) {
-          const check: boolean = await this.authService.CheckRegister({
-            key,
-            email,
-          });
-          return res.status(HttpStatus.OK).send({
-            status: check ? 'success' : 'fail',
-          });
-        }
-      }
+      await this.authService.CheckRegister(body);
+      return res.status(HttpStatus.OK).send(successResponse());
     } catch (error) {
-      return res.status(400).send({
-        status: 'fail',
-        message: error.message,
-      });
+      return res
+        .status(HttpStatus.BAD_REQUEST)
+        .send(
+          errorResponse(
+            'Kiểm tra đăng ký thất bại',
+            HttpStatus.BAD_REQUEST,
+            error.message,
+          ),
+        );
     }
   }
 
   @Post('verify-otp')
   @ApiOperation({ summary: 'Xác thực OTP và hoàn tất đăng ký' })
-  @ApiResponse({ status: 200, description: 'Đăng ký thành công' })
-  @ApiResponse({ status: 400, description: 'OTP không hợp lệ hoặc hết hạn' })
+  @ApiOkResponse({
+    description: 'Xác thực OTP thành công',
+    type: SwaggerSuccessResponse('Verify_Otp', 'auth', RegisterResponseDTO),
+  })
+  @ApiBadRequestResponse({
+    description: 'Xác thực OTP thất bại',
+    type: SwaggerErrorResponse(
+      HttpStatus.BAD_REQUEST,
+      'Xác thực OTP thất bại',
+      'Verify_Otp',
+      'auth',
+    ),
+  })
   async verifyOTP(
     @Body() registerOtpVerifyDTO: RegisterOtpVerifyDTO,
     @Res() res: Response,
   ) {
     try {
       const result = await this.authService.verifyOTP(registerOtpVerifyDTO);
-      return res.status(HttpStatus.CREATED).send({
-        status: 'success',
-        message: 'Đăng ký thành công',
-        data: result,
-      });
+      return res
+        .status(HttpStatus.CREATED)
+        .send(successResponse(result, 'Xác thực OTP thành công'));
     } catch (error) {
-      // Check for Prisma unique constraint error
       if (error.code === 'P2002' && error.meta?.target?.includes('phone')) {
-        return res.status(HttpStatus.BAD_REQUEST).send({
-          status: 'fail',
-          message: 'Số điện thoại đã được sử dụng bởi tài khoản khác',
-        });
+        return res
+          .status(HttpStatus.BAD_REQUEST)
+          .send(
+            errorResponse(
+              'Số điện thoại đã được sử dụng bởi tài khoản khác',
+              HttpStatus.BAD_REQUEST,
+              error.message,
+            ),
+          );
       }
-
-      return res.status(HttpStatus.BAD_REQUEST).send({
-        status: 'fail',
-        message: error.message,
-      });
+      return res
+        .status(HttpStatus.BAD_REQUEST)
+        .send(
+          errorResponse(
+            'OTP không hợp lệ hoặc hết hạn',
+            HttpStatus.BAD_REQUEST,
+            error.message,
+          ),
+        );
     }
   }
 
   @Post('login')
-  @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Đăng nhập với username và mật khẩu' })
-  @ApiResponse({ status: 200, description: 'Đăng nhập thành công' })
-  @ApiResponse({ status: 400, description: 'Thiếu thông tin FCM token' })
-  @ApiResponse({ status: 401, description: 'Thông tin đăng nhập không hợp lệ' })
-  @ApiResponse({ status: 500, description: 'Lỗi server nội bộ' })
+  @ApiOkResponse({
+    description: 'Đăng nhập thành công',
+    type: SwaggerSuccessResponse('Login', 'auth', LoginUserResponseDTO),
+  })
+  @ApiBadRequestResponse({
+    description: 'Đăng nhập thất bại',
+    type: SwaggerErrorResponse(
+      HttpStatus.BAD_REQUEST,
+      'Đăng nhập thất bại',
+      'Login',
+      'auth',
+    ),
+  })
   async login(
-    @Body() loginDto: LoginDTO,
+    @Body() loginDTO: LoginDTO,
     @DeviceHeaders() deviceInfo: DeviceInfo,
     @Res() res: Response,
   ) {
     if (!deviceInfo.fcmToken) {
-      return res.status(HttpStatus.BAD_REQUEST).send({
-        status: 'fail',
-        message: 'FCM token là bắt buộc để đăng nhập',
-      });
+      return res
+        .status(HttpStatus.BAD_REQUEST)
+        .send(
+          errorResponse(
+            'FCM token là bắt buộc để đăng nhập',
+            HttpStatus.BAD_REQUEST,
+            '',
+          ),
+        );
     }
-    const result = await this.authService.login(
-      loginDto,
-      deviceInfo.deviceId,
-      deviceInfo.fcmToken,
-      deviceInfo.ip,
-    );
+    try {
+      const result = await this.authService.login(
+        loginDTO,
+        deviceInfo.deviceId,
+        deviceInfo.fcmToken,
+        deviceInfo.ip,
+      );
 
-    if (!result) {
-      return res.status(HttpStatus.UNAUTHORIZED).send({
-        status: 'fail',
-        message: 'Thông tin đăng nhập không hợp lệ',
-      });
+      if (!result) {
+        throw new Error('Thông tin đăng nhập không hợp lệ');
+      }
+
+      return res
+        .status(HttpStatus.OK)
+        .send(successResponse(result, 'Đăng nhập thành công'));
+    } catch (error) {
+      return res
+        .status(HttpStatus.BAD_REQUEST)
+        .send(errorResponse('Đăng nhập thất bại', 400, error.message));
     }
-
-    return res.status(HttpStatus.OK).send({
-      status: 'success',
-      message: 'Đăng nhập thành công',
-      data: result,
-    });
   }
 
   @Post('refresh')
-  @ApiBearerAuth('JWT-auth')
+  @ApiBearerAuth('JWT-AUTH')
   @UseGuards(JwtRefreshGuard)
   @ApiOperation({ summary: 'Làm mới access token bằng refresh token' })
-  @ApiResponse({ status: 200, description: 'Làm mới token thành công' })
-  @ApiResponse({
-    status: 401,
-    description: 'Refresh token không hợp lệ hoặc hết hạn',
+  @ApiOkResponse({
+    description: 'Làm mới access token thành công',
+    type: SwaggerSuccessResponse('Refresh', 'auth', LoginUserResponseDTO),
+  })
+  @ApiBadRequestResponse({
+    description: 'Làm mới access token thất bại',
+    type: SwaggerErrorResponse(
+      HttpStatus.BAD_REQUEST,
+      'Làm mới access token thất bại',
+      'Refresh',
+      'auth',
+    ),
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Token không hợp lệ hoặc đã hết hạn',
+    type: SwaggerErrorResponse(
+      HttpStatus.UNAUTHORIZED,
+      'Token không hợp lệ hoặc đã hết hạn',
+      'Refresh',
+      'auth',
+    ),
   })
   async refresh(
     @DeviceHeaders() deviceInfo: DeviceInfo,
@@ -203,45 +286,78 @@ export class AuthController {
     try {
       this.logger.log('Refresh token request received', req.account);
       if (!req.account) {
-        return res.status(HttpStatus.UNAUTHORIZED).send({
-          status: 'fail',
-          message: 'Token không hợp lệ hoặc đã hết hạn',
-        });
+        return res
+          .status(HttpStatus.UNAUTHORIZED)
+          .send(
+            errorResponse(
+              'Token không hợp lệ hoặc đã hết hạn',
+              HttpStatus.UNAUTHORIZED,
+            ),
+          );
       }
 
       const accessToken = await this.tokenService.generateAccessToken(
         req.account,
+        req.account.profileId,
       );
 
       const refreshToken = req.headers['authorization']?.split(' ')[1];
       const newRefreshToken = await this.tokenService.generateRefreshToken({
         account: req.account,
+        profileId: req.account.profileId,
         deviceId: deviceInfo.deviceId,
         ip: deviceInfo.ip,
+        fcmToken: deviceInfo.fcmToken,
         existingToken: refreshToken,
       });
 
-      return res.status(HttpStatus.OK).send({
-        status: 'success',
-        message: 'Làm mới token thành công',
-        data: {
-          access_token: accessToken,
-          refresh_token: newRefreshToken,
-        },
-      });
+      return res.status(HttpStatus.OK).send(
+        successResponse(
+          {
+            access_token: accessToken,
+            refresh_token: newRefreshToken,
+          },
+          'Làm mới token thành công',
+        ),
+      );
     } catch (error) {
-      return res.status(HttpStatus.UNAUTHORIZED).send({
-        status: 'fail',
-        message: error.message || 'Không thể làm mới token',
-      });
+      return res
+        .status(HttpStatus.BAD_REQUEST)
+        .send(
+          errorResponse(
+            error.message || 'Không thể làm mới token',
+            HttpStatus.UNAUTHORIZED,
+          ),
+        );
     }
   }
 
   @Post('logout')
   @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth('JWT-auth')
+  @ApiBearerAuth('JWT-AUTH')
   @ApiOperation({ summary: 'Đăng xuất và thu hồi token' })
-  @ApiResponse({ status: 200, description: 'Đăng xuất thành công' })
+  @ApiOkResponse({
+    description: 'Đăng xuất thành công',
+    type: SwaggerSuccessResponse('Logout', 'auth'),
+  })
+  @ApiBadRequestResponse({
+    description: 'Đăng xuất thất bại',
+    type: SwaggerErrorResponse(
+      HttpStatus.BAD_REQUEST,
+      'Đăng xuất thất bại',
+      'Logout',
+      'auth',
+    ),
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Token không hợp lệ hoặc đã hết hạn',
+    type: SwaggerErrorResponse(
+      HttpStatus.UNAUTHORIZED,
+      'Token không hợp lệ hoặc đã hết hạn',
+      'Logout',
+      'auth',
+    ),
+  })
   async logout(
     @DeviceHeaders() deviceInfo: DeviceInfo,
     @Res() res: Response,
@@ -249,7 +365,6 @@ export class AuthController {
   ) {
     try {
       const accessToken = req.headers['authorization']?.replace('Bearer ', '');
-      // Lấy cả refresh token từ body request nếu có
       const refreshToken = (req.body as any)?.refresh_token;
 
       if (!accessToken) {
@@ -260,58 +375,100 @@ export class AuthController {
         accessToken,
         deviceInfo.ip,
         deviceInfo.deviceId,
-        refreshToken, // Pass refresh token if available
+        refreshToken,
       );
 
-      return res.status(HttpStatus.OK).send({
-        status: 'success',
-        message: 'Đăng xuất thành công',
-      });
+      return res
+        .status(HttpStatus.OK)
+        .send(successResponse(null, 'Đăng xuất thành công'));
     } catch (error) {
-      return res.status(HttpStatus.BAD_REQUEST).send({
-        status: 'fail',
-        message: error.message,
-      });
+      return res
+        .status(HttpStatus.BAD_REQUEST)
+        .send(
+          errorResponse(
+            'Đăng xuất thất bại',
+            HttpStatus.BAD_REQUEST,
+            error.message,
+          ),
+        );
     }
   }
 
   @Post('forgot-password')
-  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Quên mật khẩu' })
+  @ApiOkResponse({
+    description: 'Email đã được gửi đến bạn',
+    type: SwaggerSuccessResponse('Forgot_Password', 'auth'),
+  })
+  @ApiBadRequestResponse({
+    description: 'Quên mật khẩu thất bại',
+    type: SwaggerErrorResponse(
+      HttpStatus.BAD_REQUEST,
+      'Quên mật khẩu thất bại',
+      'Forgot_Password',
+      'auth',
+    ),
+  })
   async forgotPassword(
-    @Body() forgotPasswordDto: ForgotPasswordDTO,
+    @Body() forgotPasswordDTO: ForgotPasswordDTO,
     @Res() res: Response,
   ): Promise<any> {
     try {
-      await this.authService.forgotPassword(forgotPasswordDto);
-      return res.status(HttpStatus.OK).send({
-        status: 'success',
-        message: 'Email đã được gửi đến bạn',
-      });
+      await this.authService.forgotPassword(forgotPasswordDTO);
+      return res
+        .status(HttpStatus.OK)
+        .send(successResponse(null, 'Email đã được gửi đến bạn'));
     } catch (error) {
-      return res.status(HttpStatus.BAD_REQUEST).send({
-        status: 'success',
-        message: error.message,
-      });
+      return res
+        .status(HttpStatus.BAD_REQUEST)
+        .send(
+          errorResponse(
+            'Quên mật khẩu thất bại',
+            HttpStatus.BAD_REQUEST,
+            error.message,
+          ),
+        );
     }
   }
 
   @Post('reset-password')
-  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Đặt lại mật khẩu' })
+  @ApiOkResponse({
+    description: 'Mật khẩu đã được đặt lại',
+    type: SwaggerSuccessResponse(
+      'Reset_Password',
+      'auth',
+      GetProfileIdResponseDTO,
+    ),
+  })
+  @ApiBadRequestResponse({
+    description: 'Đặt lại mật khẩu thất bại',
+    type: SwaggerErrorResponse(
+      HttpStatus.BAD_REQUEST,
+      'Đặt lại mật khẩu thất bại',
+      'Reset_Password',
+      'auth',
+    ),
+  })
   async resetPassword(
-    @Body() resetPasswordDto: ResetPasswordDTO,
+    @Body() resetPasswordDTO: ResetPasswordDTO,
     @Res() res: Response,
   ): Promise<any> {
     try {
-      await this.authService.resetPassword(resetPasswordDto);
-      return res.status(HttpStatus.OK).send({
-        status: 'success',
-        message: 'Email đã được gửi đến bạn',
-      });
+      const result = await this.authService.resetPassword(resetPasswordDTO);
+      return res
+        .status(HttpStatus.OK)
+        .send(successResponse(result, 'Đặt lại mật khẩu thành công'));
     } catch (error) {
-      return res.status(HttpStatus.BAD_REQUEST).send({
-        status: 'success',
-        message: error.message,
-      });
+      return res
+        .status(HttpStatus.BAD_REQUEST)
+        .send(
+          errorResponse(
+            'Đặt lại mật khẩu thất bại',
+            HttpStatus.BAD_REQUEST,
+            error.message,
+          ),
+        );
     }
   }
 }
