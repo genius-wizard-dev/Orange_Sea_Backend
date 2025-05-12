@@ -720,7 +720,6 @@ export class ChatService {
     }
   }
 
-
   async isLastMessageInGroup(
     messageId: string,
     groupId: string,

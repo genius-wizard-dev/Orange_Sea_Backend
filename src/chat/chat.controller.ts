@@ -270,11 +270,11 @@ export class ChatController {
     @Res() res: Response,
   ) {
     try {
-      const { messageId, targetGroupId } = data;
+      const { messageId, groupId } = data;
 
       const result = await this.chatService.forwardMessage(
         messageId,
-        targetGroupId,
+        groupId,
         req.account.profileId,
       );
 

@@ -309,6 +309,7 @@ export class GroupService {
 
   async isGroupMember(profileId: string, groupId: string): Promise<boolean> {
     try {
+      this.logger.debug(groupId);
       const group = await this.prismaService.group.findUnique({
         where: { id: groupId },
         include: {
