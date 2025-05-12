@@ -1,22 +1,35 @@
+import { faker } from '@faker-js/faker';
 import { ApiProperty } from '@nestjs/swagger';
-import { IsArray, IsBoolean, IsOptional, IsString } from 'class-validator';
+import {
+  ArrayMinSize,
+  IsArray,
+  IsBoolean,
+  IsNotEmpty,
+  IsString,
+  IsUUID,
+} from 'class-validator';
 
-export class CreateGroupDto {
+export class CreateGroupDTO {
   @ApiProperty({
     description: 'Tên của nhóm',
     example: 'Nhóm học tập',
     required: false,
   })
   @IsString()
-  @IsOptional()
-  name?: string;
+  name: string;
 
   @ApiProperty({
     description: 'Danh sách ID của thành viên tham gia nhóm',
-    example: ['profile-id-1', 'profile-id-2'],
+    example: [
+      faker.database.mongodbObjectId(),
+      faker.database.mongodbObjectId(),
+    ],
     type: [String],
   })
   @IsArray()
+  @ArrayMinSize(2, {
+    message: 'Phải có ít nhất có 3 thành viên để tạo nhóm',
+  })
   participantIds: string[];
 
   @ApiProperty({
@@ -26,6 +39,15 @@ export class CreateGroupDto {
     required: false,
   })
   @IsBoolean()
-  @IsOptional()
-  isGroup?: boolean;
+  isGroup: boolean;
+}
+
+export class GroupIdResponseDTO {
+  @ApiProperty({
+    description: 'ID của nhóm',
+    example: faker.database.mongodbObjectId(),
+  })
+  @IsUUID()
+  @IsNotEmpty()
+  groupId: string;
 }

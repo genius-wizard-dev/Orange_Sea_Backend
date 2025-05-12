@@ -1,3 +1,4 @@
+export * from './check.friendship.dto';
 export * from './create.friendship.dto';
 export * from './friendship.response.dto';
 export * from './get.friend.dto';

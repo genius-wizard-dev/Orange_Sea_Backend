@@ -1,3 +1,4 @@
+import { faker } from '@faker-js/faker';
 import { ApiProperty } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import {
@@ -43,6 +44,7 @@ export class GetMediaDto {
   @ApiProperty({
     description: 'ID của tin nhắn dùng làm cursor để phân trang',
     required: false,
+    example: faker.database.mongodbObjectId(),
   })
   @IsString()
   @IsUUID()

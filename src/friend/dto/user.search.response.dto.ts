@@ -9,7 +9,7 @@ export enum RelationStatus {
   REJECTED = 'REJECTED',
 }
 
-export class UserSearchResponseDto {
+export class UserSearchResponseDTO{
   @ApiProperty({
     description: 'ID của người dùng',
     example: 'profile-id',

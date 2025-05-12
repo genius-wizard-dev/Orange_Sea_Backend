@@ -1,3 +1,4 @@
+import { faker } from '@faker-js/faker';
 import { ApiProperty } from '@nestjs/swagger';
 import {
   IsEmail,
@@ -6,9 +7,8 @@ import {
   Length,
   Matches,
 } from 'class-validator';
-
 export class ForgotPasswordDTO {
-  @ApiProperty({ description: 'Email' })
+  @ApiProperty({ description: 'Email', example: faker.internet.email() })
   @IsEmail()
   @IsNotEmpty()
   email: string;
@@ -18,7 +18,15 @@ export class ResetPasswordDTO {
   @IsNotEmpty()
   token: string;
 
-  @ApiProperty({ description: 'Mật khẩu mới', minLength: 6 })
+  @ApiProperty({
+    description: 'Mật khẩu mới',
+    minLength: 6,
+    example: faker.internet.password({
+      length: 10,
+      pattern: /[A-Za-z0-9!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/,
+      prefix: 'Abc1!',
+    }),
+  })
   @IsNotEmpty()
   @IsString()
   @Length(6, 50)

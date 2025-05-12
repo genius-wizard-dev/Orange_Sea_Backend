@@ -13,6 +13,7 @@ import { ResendModule } from './config/resend/resend.module';
 import { FriendshipModule } from './friend/friend.module';
 import { GroupModule } from './group/group.module';
 import { ProfileModule } from './profile/profile.module';
+import { SocketModule } from './socket/socket.module';
 import { TokenModule } from './token/token.module';
 
 @Module({
@@ -37,6 +38,8 @@ import { TokenModule } from './token/token.module';
     ResendModule,
     CloudinaryModule,
     GroupModule,
+    SocketModule,
+    RedisModule,
   ],
   controllers: [ChatController],
   providers: [CloudinaryService],

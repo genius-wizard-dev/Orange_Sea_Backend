@@ -1,7 +1,10 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Group } from '@prisma/client';
 import { CloudinaryService } from 'src/config/cloudinary/cloudinary.service';
 import { PrismaService } from 'src/config/prisma/prisma.service';
-import { ProfileService } from 'src/profile/profile.service';
+import { ProfileService } from 'src/profile/services/profile';
+import { GroupResponseDTO } from '../dto';
+import { GroupIdResponseDTO } from '../dto/create.group.dto';
 
 @Injectable()
 export class GroupService {
@@ -14,11 +17,10 @@ export class GroupService {
   ) {}
 
   async createGroup(
-    accountId: string,
+    profileId: string,
     participantIds: string[],
-    isGroup: boolean = false,
     name?: string,
-  ) {
+  ): Promise<GroupIdResponseDTO> {
     try {
       const participants = await this.prismaService.profile.findMany({
         where: {
@@ -27,45 +29,22 @@ export class GroupService {
       });
 
       if (participants.length !== participantIds.length) {
-        throw new Error('One or more participants do not exist');
-      }
-
-      const profile =
-        await this.profileService.getProfileFromAccountId(accountId);
-      if (!profile) {
-        throw new NotFoundException('Profile not found');
-      }
-      const ownerId = profile.id;
-
-      if (!isGroup && participantIds.length === 1) {
-        const existingGroup = await this.prismaService.group.findFirst({
-          where: {
-            isGroup: false,
-            AND: [
-              { participants: { some: { userId: ownerId } } },
-              { participants: { some: { userId: participantIds[0] } } },
-            ],
-          },
-        });
-
-        if (existingGroup) {
-          return existingGroup;
-        }
+        throw new Error('Một hoặc nhiều thành viên không tồn tại');
       }
 
       const group = await this.prismaService.group.create({
         data: {
           name,
-          isGroup,
-          ownerId,
+          isGroup: true,
+          ownerId: profileId,
           participants: {
             create: [
               {
-                userId: ownerId,
+                userId: profileId,
                 role: 'OWNER',
               },
               ...participantIds
-                .filter((id) => id !== ownerId)
+                .filter((id) => id !== profileId)
                 .map((userId) => ({
                   userId,
                   role: 'MEMBER' as const,
@@ -73,11 +52,10 @@ export class GroupService {
             ],
           },
         },
-        include: {
-          participants: true,
-        },
       });
-      return group;
+      return {
+        groupId: group.id,
+      };
     } catch (error) {
       this.logger.error(`Error creating group: ${error.message}`, error.stack);
       throw error;
@@ -86,9 +64,9 @@ export class GroupService {
 
   async addParticipant(
     groupId: string,
-    accountId: string,
+    profileId: string,
     newParticipantIds: string[],
-  ) {
+  ): Promise<GroupIdResponseDTO> {
     try {
       const group = await this.prismaService.group.findUnique({
         where: { id: groupId },
@@ -98,43 +76,39 @@ export class GroupService {
       });
 
       if (!group) {
-        throw new Error('Group not found');
+        throw new Error('Không tìm thấy nhóm');
       }
 
-      const profile =
-        await this.profileService.getProfileFromAccountId(accountId);
-      const userId = profile.id;
+      // Kiểm tra quyền của người thực hiện yêu cầu
 
-      const requester = group.participants.find((p) => p.userId === userId);
-      if (!requester || requester.role !== 'OWNER') {
-        throw new Error('Only the group owner can add participants');
+      if (group.ownerId !== profileId) {
+        throw new Error('Chỉ chủ sở hữu mới có thể thêm thành viên');
       }
 
-      // Check if participants exist
-      const existingProfiles = await this.prismaService.profile.findMany({
-        where: {
-          id: {
-            in: newParticipantIds,
-          },
-        },
-      });
-
-      if (existingProfiles.length !== newParticipantIds.length) {
-        throw new Error('One or more participants do not exist');
-      }
-
-      // Filter out participants that are already in the group
       const existingParticipantIds = group.participants.map((p) => p.userId);
+
       const uniqueNewParticipantIds = newParticipantIds.filter(
         (id) => !existingParticipantIds.includes(id),
       );
 
       if (uniqueNewParticipantIds.length === 0) {
-        throw new Error('All users are already participants in this group');
+        throw new Error('Tất cả người dùng đã là thành viên trong nhóm');
       }
 
-      // Add the new participants
-      return await this.prismaService.group.update({
+      // Kiểm tra sự tồn tại của các profile mới
+      const existingProfiles = await this.prismaService.profile.findMany({
+        where: {
+          id: {
+            in: uniqueNewParticipantIds,
+          },
+        },
+      });
+
+      if (existingProfiles.length !== uniqueNewParticipantIds.length) {
+        throw new Error('Một hoặc nhiều thành viên không tồn tại');
+      }
+
+      const result = await this.prismaService.group.update({
         where: { id: groupId },
         data: {
           participants: {
@@ -144,10 +118,15 @@ export class GroupService {
             })),
           },
         },
-        include: {
-          participants: true,
-        },
       });
+
+      if (!result) {
+        throw new Error('Thêm thành viên thất bại');
+      }
+
+      return {
+        groupId: result.id,
+      };
     } catch (error) {
       this.logger.error(
         `Error adding participants: ${error.message}`,
@@ -159,9 +138,9 @@ export class GroupService {
 
   async removeParticipants(
     groupId: string,
-    accountId: string,
+    profileId: string,
     participantIds: string[],
-  ) {
+  ): Promise<GroupIdResponseDTO> {
     try {
       const group = await this.prismaService.group.findUnique({
         where: { id: groupId },
@@ -174,26 +153,18 @@ export class GroupService {
         throw new Error('Group not found');
       }
 
-      const profile =
-        await this.profileService.getProfileFromAccountId(accountId);
-      const userId = profile.id;
-
-      const requester = group.participants.find((p) => p.userId === userId);
-      if (!requester || requester.role !== 'OWNER') {
-        throw new Error('Only the group owner can remove participants');
+      if (group.ownerId !== profileId) {
+        throw new Error('Chỉ chủ sở hữu mới có thể xóa thành viên');
       }
 
-      // Cannot remove the owner
       if (participantIds.includes(group.ownerId)) {
-        throw new Error('Cannot remove the group owner');
+        throw new Error('Không thể xóa chủ sở hữu nhóm');
       }
 
-      // Cannot remove yourself
-      if (participantIds.includes(userId)) {
-        throw new Error('Cannot remove yourself from the group');
+      if (participantIds.includes(profileId)) {
+        throw new Error('Không thể xóa chính mình khỏi nhóm');
       }
 
-      // Find existing group members from the provided participantIds
       const existingMembers: string[] = [];
       const nonMembers: string[] = [];
 
@@ -206,49 +177,33 @@ export class GroupService {
         }
       }
 
-      // If none of the users are members, return an appropriate message
       if (existingMembers.length === 0) {
-        return {
-          statusCode: 400,
-          message: 'None of the specified users are members of this group',
-          nonMembers,
-        };
+        throw new Error('Không có thành viên nào trong nhóm');
       }
 
-      // Check if the group will have at least 2 members after removal
       const remainingParticipantCount =
         group.participants.length - existingMembers.length;
       if (remainingParticipantCount < 2) {
-        return {
-          statusCode: 400,
-          message:
-            'Cannot remove the last member. If you want to end the conversation, please delete the group instead.',
-          suggestDeleteGroup: true,
-        };
+        throw new Error(
+          'Không thể xóa thành viên cuối cùng. Nếu bạn muốn kết thúc cuộc trò chuyện, vui lòng xóa nhóm thay thế.',
+        );
       }
 
-      // Find the participants to remove
       const participantsToRemove = group.participants.filter((p) =>
         existingMembers.includes(p.userId),
       );
-
-      // Remove the valid participants
-      await this.prismaService.participant.deleteMany({
+      const result = await this.prismaService.participant.deleteMany({
         where: {
           id: {
             in: participantsToRemove.map((p) => p.id),
           },
         },
       });
-
+      if (!result) {
+        throw new Error('Không thể xóa thành viên');
+      }
       return {
-        statusCode: 200,
-        message: 'Participants removed successfully',
-        removedCount: existingMembers.length,
-        nonMembers:
-          nonMembers.length > 0
-            ? { count: nonMembers.length, ids: nonMembers }
-            : null,
+        groupId: groupId,
       };
     } catch (error) {
       this.logger.error(
@@ -259,9 +214,11 @@ export class GroupService {
     }
   }
 
-  async deleteGroup(groupId: string, accountId: string) {
+  async deleteGroup(
+    groupId: string,
+    profileId: string,
+  ): Promise<GroupIdResponseDTO> {
     try {
-      // Check if the user is the owner of the group
       const group = await this.prismaService.group.findUnique({
         where: { id: groupId },
       });
@@ -270,51 +227,39 @@ export class GroupService {
         throw new Error('Group not found');
       }
 
-      const profile =
-        await this.profileService.getProfileFromAccountId(accountId);
-      const userId = profile.id;
-
-      if (group.ownerId !== userId) {
-        throw new Error('Only the group owner can delete the group');
+      if (group.ownerId !== profileId) {
+        throw new Error('Chỉ chủ sở hữu mới có thể xóa nhóm');
       }
 
-      // Delete the group
-      return this.prismaService.group.delete({
+      const result = await this.prismaService.group.delete({
         where: { id: groupId },
       });
+
+      if (!result) {
+        throw new Error('Không thể xóa nhóm');
+      }
+
+      return {
+        groupId: groupId,
+      };
     } catch (error) {
       this.logger.error(`Error deleting group: ${error.message}`, error.stack);
       throw error;
     }
   }
 
-  async getGroupByAccountId(accountId: string) {
+  async getGroup(profileId: string): Promise<GroupResponseDTO[]> {
     try {
-      const profile =
-        await this.profileService.getProfileFromAccountId(accountId);
-      const userId = profile.id;
-
-      return this.prismaService.group.findMany({
+      const groups = await this.prismaService.group.findMany({
         where: {
           participants: {
             some: {
-              userId,
+              userId: profileId,
             },
           },
         },
         include: {
           messages: {
-            select: {
-              id: true,
-              content: true,
-              senderId: true,
-              fileUrl: true,
-              createdAt: true,
-              updatedAt: true,
-              isRecalled: true,
-              type: true,
-              fileName: true,
-            },
             orderBy: {
               createdAt: 'desc',
             },
@@ -336,6 +281,23 @@ export class GroupService {
           updatedAt: 'desc',
         },
       });
+
+      return groups.map((group) => ({
+        id: group.id,
+        name: group.name,
+        ownerId: group.ownerId,
+        isGroup: group.isGroup,
+        createdAt: group.createdAt,
+        updatedAt: group.updatedAt,
+        participants: group.participants.map((participant) => ({
+          id: participant.id,
+          profileId: participant.userId,
+          role: participant.role,
+          name: participant.user.name,
+          avatar: participant.user.avatar,
+        })),
+        lastMessage: group.messages[0],
+      }));
     } catch (error) {
       this.logger.error(
         `Error getting groups by account ID: ${error.message}`,
@@ -345,46 +307,6 @@ export class GroupService {
     }
   }
 
-  async getGroupsByProfileId(profileId: string) {
-    try {
-      const profile = await this.prismaService.profile.findUnique({
-        where: { id: profileId },
-      });
-      if (!profile) {
-        throw new Error('Profile not found');
-      }
-      const userId = profile.id;
-
-      return this.prismaService.group.findMany({
-        where: {
-          participants: {
-            some: {
-              userId,
-            },
-          },
-        },
-        include: {
-          participants: {
-            include: {
-              user: true,
-            },
-          },
-          messages: {
-            orderBy: {
-              createdAt: 'desc',
-            },
-            take: 1,
-          },
-        },
-        orderBy: {
-          updatedAt: 'desc',
-        },
-      });
-    } catch (error) {
-      this.logger.error(`Error getting groups: ${error.message}`, error.stack);
-      throw error;
-    }
-  }
   async isGroupMember(profileId: string, groupId: string): Promise<boolean> {
     try {
       this.logger.debug(groupId);
@@ -398,14 +320,7 @@ export class GroupService {
       if (!group) {
         throw new Error('Group not found');
       }
-
-      const profile = await this.prismaService.profile.findUnique({
-        where: { id: profileId },
-      });
-      if (!profile) {
-        throw new Error('Profile not found');
-      }
-      return group.participants.some((p) => p.userId === profile.id);
+      return group.participants.some((p) => p.userId === profileId);
     } catch (error) {
       this.logger.error(
         `Error checking group membership: ${error.message}`,
@@ -442,7 +357,7 @@ export class GroupService {
     }
   }
 
-  async isGroupOwner(accountId: string, groupId: string): Promise<boolean> {
+  async isGroupOwner(profileId: string, groupId: string): Promise<boolean> {
     try {
       const group = await this.prismaService.group.findUnique({
         where: { id: groupId },
@@ -452,15 +367,10 @@ export class GroupService {
         throw new NotFoundException('Group not found');
       }
 
-      const profile =
-        await this.profileService.getProfileFromAccountId(accountId);
-      if (!profile) {
-        throw new NotFoundException('Profile not found');
-      }
       this.logger.debug(
-        `Checking if profile ID ${profile.id} is the owner of group ID ${group.ownerId}`,
+        `Checking if profile ID ${profileId} is the owner of group ID ${group.ownerId}`,
       );
-      return group.ownerId === profile.id;
+      return group.ownerId === profileId;
     } catch (error) {
       this.logger.error(
         `Error checking group ownership: ${error.message}`,
@@ -470,50 +380,71 @@ export class GroupService {
     }
   }
 
-  async searchGroups(accountId: string, searchTerm: string) {
+  async getGroupById(groupId: string): Promise<Group> {
     try {
-      const profile =
-        await this.profileService.getProfileFromAccountId(accountId);
-      const userId = profile.id;
-
-      return this.prismaService.group.findMany({
-        where: {
-          participants: {
-            some: {
-              userId,
-            },
-          },
-          name: {
-            contains: searchTerm,
-            mode: 'insensitive', // Case-insensitive search
-          },
-        },
-        include: {
-          participants: {
-            include: {
-              user: true,
-            },
-          },
-          messages: {
-            orderBy: {
-              createdAt: 'desc',
-            },
-            take: 1,
-          },
-        },
-        orderBy: {
-          updatedAt: 'desc',
-        },
+      const group = await this.prismaService.group.findUnique({
+        where: { id: groupId },
       });
+      if (!group) {
+        throw new NotFoundException('Group not found');
+      }
+      return group;
     } catch (error) {
       this.logger.error(
-        `Error searching groups: ${error.message}`,
+        `Error getting group by ID: ${error.message}`,
         error.stack,
       );
       throw error;
     }
   }
-  async getGroupInfo(groupId: string, profileId: string) {
+
+  // async searchGroups(accountId: string, searchTerm: string) {
+  //   try {
+  //     const profile =
+  //       await this.profileService.getProfileFromAccountId(accountId);
+  //     const userId = profile.id;
+
+  //     return this.prismaService.group.findMany({
+  //       where: {
+  //         participants: {
+  //           some: {
+  //             userId,
+  //           },
+  //         },
+  //         name: {
+  //           contains: searchTerm,
+  //           mode: 'insensitive', // Case-insensitive search
+  //         },
+  //       },
+  //       include: {
+  //         participants: {
+  //           include: {
+  //             user: true,
+  //           },
+  //         },
+  //         messages: {
+  //           orderBy: {
+  //             createdAt: 'desc',
+  //           },
+  //           take: 1,
+  //         },
+  //       },
+  //       orderBy: {
+  //         updatedAt: 'desc',
+  //       },
+  //     });
+  //   } catch (error) {
+  //     this.logger.error(
+  //       `Error searching groups: ${error.message}`,
+  //       error.stack,
+  //     );
+  //     throw error;
+  //   }
+  // }
+  async getGroupInfo(
+    groupId: string,
+    profileId: string,
+  ): Promise<GroupResponseDTO> {
     try {
       const profile = await this.profileService.getProfileById(profileId);
       const userId = profile.id;
@@ -537,7 +468,25 @@ export class GroupService {
           },
         },
       });
-      return group;
+      if (!group) {
+        throw new NotFoundException('Group not found');
+      }
+      return {
+        id: group.id,
+        name: group.name,
+        ownerId: group.ownerId,
+        isGroup: group.isGroup,
+        createdAt: group.createdAt,
+        updatedAt: group.updatedAt,
+        participants: group.participants.map((participant) => ({
+          id: participant.id,
+          profileId: participant.userId,
+          role: participant.role,
+          name: participant.user.name,
+          avatar: participant.user.avatar,
+        })),
+        lastMessage: group.messages[0],
+      };
     } catch (error) {
       this.logger.error(
         `Error getting group info: ${error.message}`,
@@ -547,7 +496,10 @@ export class GroupService {
     }
   }
 
-  async leaveGroup(groupId: string, accountId: string) {
+  async leaveGroup(
+    groupId: string,
+    profileId: string,
+  ): Promise<GroupIdResponseDTO> {
     try {
       const group = await this.prismaService.group.findUnique({
         where: { id: groupId },
@@ -565,50 +517,47 @@ export class GroupService {
         throw new Error('You cannot leave a direct message conversation');
       }
 
-      const profile =
-        await this.profileService.getProfileFromAccountId(accountId);
-      const userId = profile.id;
-
       // Find the participant
-      const participant = group.participants.find((p) => p.userId === userId);
+      const participant = group.participants.find(
+        (p) => p.userId === profileId,
+      );
       if (!participant) {
         throw new Error('You are not a member of this group');
       }
 
-      // Check if user is the owner
-      if (group.ownerId === userId) {
+      if (group.ownerId === profileId) {
         throw new Error(
           'Group owner cannot leave. Transfer ownership first or delete the group',
         );
       }
 
-      // Check if the group will have at least 2 members after leaving
       if (group.participants.length <= 2) {
         throw new Error(
           'Cannot leave as the group needs at least 2 members to exist',
         );
       }
 
-      // Remove the participant
-      await this.prismaService.participant.delete({
+      const result = await this.prismaService.participant.delete({
         where: { id: participant.id },
       });
 
+      if (!result) {
+        throw new Error('Failed to leave group');
+      }
+
       return {
-        statusCode: 200,
-        message: 'Successfully left the group',
+        groupId: groupId,
       };
     } catch (error) {
       this.logger.error(`Error leaving group: ${error.message}`, error.stack);
       throw error;
     }
   }
-
   async transferOwnership(
     groupId: string,
-    accountId: string,
+    profileId: string,
     newOwnerId: string,
-  ) {
+  ): Promise<GroupIdResponseDTO> {
     try {
       const group = await this.prismaService.group.findUnique({
         where: { id: groupId },
@@ -621,66 +570,47 @@ export class GroupService {
         throw new Error('Group not found');
       }
 
-      // Check if it's a group chat (not a direct message)
       if (!group.isGroup) {
         throw new Error('Ownership transfer is only available for group chats');
       }
 
-      const profile =
-        await this.profileService.getProfileFromAccountId(accountId);
-      const userId = profile.id;
-
-      // Check if requester is the current owner
-      if (group.ownerId !== userId) {
+      if (group.ownerId !== profileId) {
         throw new Error('Only the current owner can transfer ownership');
       }
 
-      // Check if new owner is a member
+      // Tìm người dùng mới và hiện tại trong nhóm
       const newOwnerParticipant = group.participants.find(
         (p) => p.userId === newOwnerId,
       );
+      const currentOwnerParticipant = group.participants.find(
+        (p) => p.userId === profileId,
+      );
+
       if (!newOwnerParticipant) {
         throw new Error('The new owner must be a current member of the group');
       }
-
-      // Update current owner to member
-      const currentOwnerParticipant = group.participants.find(
-        (p) => p.userId === userId,
-      );
 
       if (!currentOwnerParticipant) {
         throw new Error('Current owner participant not found in the group');
       }
 
-      await this.prismaService.participant.update({
-        where: { id: currentOwnerParticipant.id },
-        data: { role: 'MEMBER' },
-      });
+      // Thực hiện cập nhật trong một giao dịch để đảm bảo tính nhất quán
+      await this.prismaService.$transaction([
+        this.prismaService.participant.update({
+          where: { id: currentOwnerParticipant.id },
+          data: { role: 'MEMBER' },
+        }),
+        this.prismaService.participant.update({
+          where: { id: newOwnerParticipant.id },
+          data: { role: 'OWNER' },
+        }),
+        this.prismaService.group.update({
+          where: { id: groupId },
+          data: { ownerId: newOwnerId },
+        }),
+      ]);
 
-      // Update new owner role
-      await this.prismaService.participant.update({
-        where: { id: newOwnerParticipant.id },
-        data: { role: 'OWNER' },
-      });
-
-      // Update group owner
-      const updatedGroup = await this.prismaService.group.update({
-        where: { id: groupId },
-        data: { ownerId: newOwnerId },
-        include: {
-          participants: {
-            include: {
-              user: true,
-            },
-          },
-        },
-      });
-
-      return {
-        statusCode: 200,
-        message: 'Ownership transferred successfully',
-        data: updatedGroup,
-      };
+      return { groupId };
     } catch (error) {
       this.logger.error(
         `Error transferring ownership: ${error.message}`,
@@ -690,7 +620,11 @@ export class GroupService {
     }
   }
 
-  async renameGroup(groupId: string, accountId: string, newName: string) {
+  async renameGroup(
+    groupId: string,
+    profileId: string,
+    newName: string,
+  ): Promise<GroupIdResponseDTO> {
     try {
       const group = await this.prismaService.group.findUnique({
         where: { id: groupId },
@@ -703,22 +637,14 @@ export class GroupService {
         throw new Error('Group not found');
       }
 
-      // Check if it's a group chat (not a direct message)
       if (!group.isGroup) {
         throw new Error('Renaming is only available for group chats');
       }
 
-      const profile =
-        await this.profileService.getProfileFromAccountId(accountId);
-      const userId = profile.id;
-
-      // Check if requester is the current owner
-      const requester = group.participants.find((p) => p.userId === userId);
-      if (!requester || requester.role !== 'OWNER') {
+      if (profileId !== group.ownerId) {
         throw new Error('Only the current owner can rename the group');
       }
 
-      // Update group name
       const updatedGroup = await this.prismaService.group.update({
         where: { id: groupId },
         data: { name: newName },
@@ -730,11 +656,11 @@ export class GroupService {
           },
         },
       });
-
+      if (!updatedGroup) {
+        throw new Error('Failed to rename group');
+      }
       return {
-        statusCode: 200,
-        message: 'Group renamed successfully',
-        data: updatedGroup,
+        groupId: updatedGroup.id,
       };
     } catch (error) {
       this.logger.error(`Error renaming group: ${error.message}`, error.stack);
@@ -744,9 +670,9 @@ export class GroupService {
 
   async updateGroupAvatar(
     groupId: string,
-    accountId: string,
+    profileId: string,
     file: Express.Multer.File,
-  ) {
+  ): Promise<GroupIdResponseDTO> {
     try {
       const group = await this.prismaService.group.findUnique({
         where: { id: groupId },
@@ -766,13 +692,7 @@ export class GroupService {
         );
       }
 
-      const profile =
-        await this.profileService.getProfileFromAccountId(accountId);
-      const userId = profile.id;
-
-      // Kiểm tra xem người dùng có phải là chủ sở hữu không
-      const requester = group.participants.find((p) => p.userId === userId);
-      if (!requester || requester.role !== 'OWNER') {
+      if (profileId !== group.ownerId) {
         throw new Error('Chỉ chủ sở hữu mới có thể cập nhật avatar của nhóm');
       }
 
@@ -780,11 +700,9 @@ export class GroupService {
         throw new Error('Không tìm thấy file ảnh');
       }
 
-      // Upload ảnh mới lên Cloudinary
       const filename = `group_${groupId}`;
       this.logger.debug(`Đang tải lên avatar mới với tên file: ${filename}`);
 
-      // Upload ảnh lên Cloudinary với tên cố định
       const uploadResult =
         await this.cloudinaryService.uploadBufferToCloudinary(
           file.buffer,
@@ -792,45 +710,29 @@ export class GroupService {
           'group-avatars',
         );
 
-      // Lấy URL từ kết quả
       const avatarUrl = uploadResult.url;
 
       this.logger.debug(`Tải lên avatar thành công, URL: ${avatarUrl}`);
 
-      try {
-        // Cập nhật avatar của nhóm
-        const updatedGroup = await this.prismaService.$transaction(
-          async (tx) => {
-            return tx.group.update({
-              where: { id: groupId },
-              data: {
-                avatar: avatarUrl,
-              },
-              include: {
-                participants: {
-                  include: {
-                    user: true,
-                  },
-                },
-              },
-            });
+      const updatedGroup = await this.prismaService.$transaction(async (tx) => {
+        return tx.group.update({
+          where: { id: groupId },
+          data: {
+            avatar: avatarUrl,
           },
-        );
+          include: {
+            participants: {
+              include: {
+                user: true,
+              },
+            },
+          },
+        });
+      });
 
-        return {
-          statusCode: 200,
-          message: 'Cập nhật avatar nhóm thành công',
-          data: updatedGroup,
-        };
-      } catch (prismaError) {
-        this.logger.error(
-          `Lỗi Prisma khi cập nhật avatar: ${prismaError.message}`,
-          prismaError.stack,
-        );
-        throw new Error(
-          `Không thể cập nhật avatar nhóm trong cơ sở dữ liệu: ${prismaError.message}`,
-        );
-      }
+      return {
+        groupId: updatedGroup.id,
+      };
     } catch (error) {
       this.logger.error(
         `Lỗi cập nhật avatar nhóm: ${error.message}`,

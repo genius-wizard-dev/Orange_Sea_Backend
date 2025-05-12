@@ -1,7 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsNotEmpty, IsString, MinLength } from 'class-validator';
 
-export class SearchUserDto {
+export class SearchUserDTO{
   @ApiProperty({
     description: 'Từ khóa tìm kiếm (tên người dùng hoặc số điện thoại)',
     example: 'nguyen',
