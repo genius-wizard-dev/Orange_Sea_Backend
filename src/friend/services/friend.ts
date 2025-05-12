@@ -1,10 +1,10 @@
 /* eslint-disable prettier/prettier */
-import { PrismaClient } from '@prisma/client';
-import { CreateFriendshipDto } from './dto/create.friendship.dto';
-import { FriendshipResponseDto } from './dto/friendship.response.dto';
-import { FriendResponse } from './dto/get.friend.dto';
-import { FriendRequestAction } from './dto/handle.request.dto';
-import { UserSearchResponseDto } from './dto/user.search.response.dto';
+import { Friendship, PrismaClient } from '@prisma/client';
+import { CheckFriendshipResponseDto } from '../dto';
+import { CreateFriendshipResponseDTO } from '../dto/create.friendship.dto';
+import { FriendResponse } from '../dto/get.friend.dto';
+import { FriendRequestAction } from '../dto/handle.request.dto';
+import { UserSearchResponseDTO } from '../dto/user.search.response.dto';
 
 export class FriendshipService {
   private prisma: PrismaClient;
@@ -13,24 +13,28 @@ export class FriendshipService {
     this.prisma = new PrismaClient();
   }
 
+  async getFriendShipById(friendShipId: string): Promise<Friendship> {
+    try {
+      const friendShip = await this.prisma.friendship.findUnique({
+        where: { id: friendShipId },
+      });
+      if (!friendShip) throw new Error('Không tìm thấy mối quan hệ');
+      return friendShip;
+    } finally {
+      await this.prisma.$disconnect();
+    }
+  }
+
   async sendFriendRequest(
     senderId: string,
-    dto: CreateFriendshipDto,
-  ): Promise<FriendshipResponseDto> {
+    receiverId: string,
+  ): Promise<CreateFriendshipResponseDTO> {
     try {
-      const senderProfile = await this.prisma.profile.findUnique({
-        where: { accountId: senderId },
-      });
-
-      if (!senderProfile) {
-        throw new Error('Người gửi không tồn tại');
-      }
-
       const existingFriendship = await this.prisma.friendship.findUnique({
         where: {
           senderId_receiverId: {
-            senderId: senderProfile.id,
-            receiverId: dto.receiverId,
+            senderId: senderId,
+            receiverId: receiverId,
           },
         },
       });
@@ -41,35 +45,25 @@ export class FriendshipService {
 
       const friendship = await this.prisma.friendship.create({
         data: {
-          senderId: senderProfile.id,
-          receiverId: dto.receiverId,
+          senderId: senderId,
+          receiverId: receiverId,
           status: 'PENDING',
         },
       });
 
       return {
-        id: friendship.id,
-        status: friendship.status,
-        message: 'Yêu cầu kết bạn đã được gửi thành công',
+        friendshipId: friendship.id,
       };
     } finally {
       await this.prisma.$disconnect();
     }
   }
 
-  async getReceivedRequests(accountId: string): Promise<FriendResponse[]> {
+  async getReceivedRequests(profileId: string): Promise<FriendResponse[]> {
     try {
-      const receiverProfile = await this.prisma.profile.findUnique({
-        where: { accountId },
-      });
-
-      if (!receiverProfile) {
-        throw new Error('Người nhận không tồn tại');
-      }
-
       const friendships = await this.prisma.friendship.findMany({
         where: {
-          receiverId: receiverProfile.id,
+          receiverId: profileId,
           status: 'PENDING',
         },
         select: {
@@ -95,20 +89,11 @@ export class FriendshipService {
     }
   }
 
-  async getSendingRequests(accountId: string): Promise<FriendResponse[]> {
+  async getSendingRequests(profileId: string): Promise<FriendResponse[]> {
     try {
-      const senderProfile = await this.prisma.profile.findUnique({
-        where: { accountId },
-      });
-
-      if (!senderProfile) {
-        throw new Error('Người gửi không tồn tại');
-      }
-
-      // Fetch friends with optimized query
       const friendships = await this.prisma.friendship.findMany({
         where: {
-          senderId: senderProfile.id,
+          senderId: profileId,
           status: 'PENDING',
         },
         select: {
@@ -136,46 +121,67 @@ export class FriendshipService {
 
   async handleFriendRequest(
     friendshipId: string,
-    receiverId: string,
+    profileId: string,
     action: FriendRequestAction,
-  ): Promise<void> {
+  ): Promise<CreateFriendshipResponseDTO> {
     try {
-      const receiverProfile = await this.prisma.profile.findUnique({
-        where: { accountId: receiverId },
-      });
-
-      if (!receiverProfile) {
-        throw new Error('Người nhận không tồn tại');
-      }
-
-      const friendRequest = await this.prisma.friendship.findUnique({
+      // Tìm kiếm yêu cầu kết bạn
+      const friendship = await this.prisma.friendship.findUnique({
         where: { id: friendshipId },
+        include: {
+          sender: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+          receiver: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+        },
       });
 
-      if (!friendRequest || friendRequest.receiverId !== receiverProfile.id) {
-        throw new Error('Không có quyền xử lý yêu cầu này');
+      // Kiểm tra yêu cầu kết bạn tồn tại
+      if (!friendship) {
+        throw new Error('Không tìm thấy yêu cầu kết bạn');
       }
+
+      // Kiểm tra người dùng có quyền xử lý yêu cầu này không
+      if (friendship.receiverId !== profileId) {
+        throw new Error('Bạn không có quyền xử lý yêu cầu kết bạn này');
+      }
+
+      // Kiểm tra trạng thái hiện tại của yêu cầu
+      if (friendship.status !== 'PENDING') {
+        throw new Error('Yêu cầu kết bạn này đã được xử lý trước đó');
+      }
+
+      // Cập nhật trạng thái yêu cầu kết bạn
+      const newStatus =
+        action === FriendRequestAction.ACCEPT ? 'ACCEPTED' : 'REJECTED';
 
       await this.prisma.friendship.update({
         where: { id: friendshipId },
-        data: {
-          status:
-            action === FriendRequestAction.ACCEPT ? 'ACCEPTED' : 'REJECTED',
-        },
+        data: { status: newStatus },
       });
+
+      // Nếu chấp nhận kết bạn, tạo nhóm chat giữa hai người
       if (action === FriendRequestAction.ACCEPT) {
         await this.prisma.group.create({
           data: {
             isGroup: false,
-            ownerId: receiverProfile.id,
+            ownerId: friendship.receiverId,
             participants: {
               create: [
                 {
-                  userId: receiverProfile.id,
+                  userId: friendship.receiverId,
                   role: 'OWNER',
                 },
                 {
-                  userId: friendRequest.senderId,
+                  userId: friendship.senderId,
                   role: 'MEMBER',
                 },
               ],
@@ -183,26 +189,27 @@ export class FriendshipService {
           },
         });
       }
+
+      return {
+        friendshipId: friendship.id,
+      };
+    } catch (error) {
+      if (error instanceof Error) {
+        throw new Error(`Lỗi khi xử lý yêu cầu kết bạn: ${error.message}`);
+      }
+      throw new Error('Lỗi không xác định khi xử lý yêu cầu kết bạn');
     } finally {
       await this.prisma.$disconnect();
     }
   }
 
-  async getFriends(accountId: string): Promise<FriendResponse[]> {
+  async getFriends(profileId: string): Promise<FriendResponse[]> {
     try {
-      const profile = await this.prisma.profile.findUnique({
-        where: { accountId },
-      });
-
-      if (!profile) {
-        throw new Error('Người dùng không tồn tại');
-      }
-
       const friendships = await this.prisma.friendship.findMany({
         where: {
           OR: [
-            { senderId: profile.id, status: 'ACCEPTED' },
-            { receiverId: profile.id, status: 'ACCEPTED' },
+            { senderId: profileId, status: 'ACCEPTED' },
+            { receiverId: profileId, status: 'ACCEPTED' },
           ],
         },
         include: {
@@ -230,7 +237,7 @@ export class FriendshipService {
       // Return only the friend's profile information with specific fields
       return friendships.map((friendship) => {
         const friendProfile =
-          friendship.senderId === profile.id
+          friendship.senderId === profileId
             ? friendship.receiver
             : friendship.sender;
 
@@ -252,17 +259,9 @@ export class FriendshipService {
 
   async deleteFriendship(
     friendshipId: string,
-    accountId: string,
+    profileId: string,
   ): Promise<void> {
     try {
-      const profile = await this.prisma.profile.findUnique({
-        where: { accountId },
-      });
-
-      if (!profile) {
-        throw new Error('Người dùng không tồn tại');
-      }
-
       const friendship = await this.prisma.friendship.findUnique({
         where: { id: friendshipId },
       });
@@ -273,8 +272,8 @@ export class FriendshipService {
 
       // Check if the user is part of this friendship
       if (
-        friendship.senderId !== profile.id &&
-        friendship.receiverId !== profile.id
+        friendship.senderId !== profileId &&
+        friendship.receiverId !== profileId
       ) {
         throw new Error('Không có quyền xóa mối quan hệ này');
       }
@@ -307,22 +306,14 @@ export class FriendshipService {
   }
 
   async searchUser(
-    accountId: string,
+    profileId: string,
     keyword: string,
-  ): Promise<UserSearchResponseDto[]> {
+  ): Promise<UserSearchResponseDTO[]> {
     try {
-      // Ensure the requester has a profile
-      const profile = await this.prisma.profile.findUnique({
-        where: { accountId },
-      });
-      if (!profile) {
-        throw new Error('Người dùng không tồn tại');
-      }
-
       const users = await this.prisma.profile.findMany({
         where: {
           AND: [
-            { accountId: { not: accountId } },
+            { id: { not: profileId } },
             {
               OR: [
                 {
@@ -357,37 +348,36 @@ export class FriendshipService {
     }
   }
   async isFriend(
-    accountId: string,
-    profileId: string
-  ): Promise<boolean> {
+    profileId: string,
+    profileIdToCheck: string,
+  ): Promise<CheckFriendshipResponseDto> {
     try {
       const userProfile = await this.prisma.profile.findUnique({
-        where: { accountId },
+        where: { id: profileIdToCheck },
       });
 
       if (!userProfile) {
-        throw new Error('Người dùng không tồn tại');
+        throw new Error('Người dùng cần kiểm tra không tồn tại');
       }
 
-      // Check if there's an accepted friendship between the two users
       const friendship = await this.prisma.friendship.findFirst({
         where: {
           OR: [
             {
               senderId: userProfile.id,
               receiverId: profileId,
-              status: 'ACCEPTED'
+              status: 'ACCEPTED',
             },
             {
               senderId: profileId,
               receiverId: userProfile.id,
-              status: 'ACCEPTED'
-            }
-          ]
-        }
+              status: 'ACCEPTED',
+            },
+          ],
+        },
       });
 
-      return !!friendship;
+      return { isFriend: !!friendship };
     } finally {
       await this.prisma.$disconnect();
     }

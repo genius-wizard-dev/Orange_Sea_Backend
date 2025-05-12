@@ -1,12 +1,17 @@
+import { faker } from '@faker-js/faker';
 import { ApiProperty } from '@nestjs/swagger';
 import { IsNotEmpty, IsString, Length, Matches } from 'class-validator';
-
 export class UpdatePasswordDTO {
   @ApiProperty({
     description: 'Mật khẩu hiện tại (bắt buộc khi thay đổi mật khẩu)',
-    minLength: 5,
+    minLength: 6,
     maxLength: 50,
     required: true,
+    example: faker.internet.password({
+      length: 10,
+      pattern: /[A-Za-z0-9!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/,
+      prefix: 'Abc1!',
+    }),
   })
   @IsString()
   @IsNotEmpty()
@@ -23,9 +28,14 @@ export class UpdatePasswordDTO {
 
   @ApiProperty({
     description: 'Mật khẩu mới',
-    minLength: 5,
+    minLength: 6,
     maxLength: 50,
     required: true,
+    example: faker.internet.password({
+      length: 10,
+      pattern: /[A-Za-z0-9!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/,
+      prefix: 'Abc1!',
+    }),
   })
   @IsNotEmpty()
   @IsString()

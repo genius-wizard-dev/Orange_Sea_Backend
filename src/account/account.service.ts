@@ -8,10 +8,7 @@ import { Account } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from 'src/config/prisma/prisma.service';
 import { RedisService } from 'src/config/redis/redis.service';
-import {
-  AccountResponseDto,
-  AccountWithProfileResponseDto,
-} from './dto/account.response.dto';
+import { AccountResponseDTO } from './dto/account.response.dto';
 import { UpdatePasswordDTO } from './dto/update.account.dto';
 
 @Injectable()
@@ -23,46 +20,19 @@ export class AccountService {
     private readonly redisService: RedisService,
   ) {}
 
-  async findAccountById(id: string): Promise<AccountWithProfileResponseDto> {
-    const account = await this.prisma.account.findUnique({
-      where: { id },
-      include: { profile: true },
-    });
-
-    if (!account) {
-      throw new NotFoundException(`Không tìm thấy tài khoản với ID: ${id}`);
-    }
-    return this.mapToAccountWithProfileDTO(account);
-  }
-
-  async findAccountByUsername(
-    username: string,
-  ): Promise<AccountWithProfileResponseDto> {
-    const account = await this.prisma.account.findUnique({
-      where: { username },
-      include: { profile: true },
-    });
-
-    if (!account) {
-      throw new NotFoundException(
-        `Không tìm thấy tài khoản với username: ${username}`,
-      );
-    }
-
-    return this.mapToAccountWithProfileDTO(account);
-  }
-
-  async changPassword(
-    id: string,
+  async changePassword(
+    accountId: string,
     updatePassword: UpdatePasswordDTO,
-  ): Promise<AccountResponseDto> {
+  ): Promise<AccountResponseDTO> {
     try {
       const account = await this.prisma.account.findUnique({
-        where: { id },
+        where: { id: accountId },
       });
 
       if (!account) {
-        throw new NotFoundException(`Không tìm thấy tài khoản với ID: ${id}`);
+        throw new NotFoundException(
+          `Không tìm thấy tài khoản với ID: ${accountId}`,
+        );
       }
 
       const isPasswordValid = await bcrypt.compare(
@@ -74,10 +44,8 @@ export class AccountService {
         throw new UnauthorizedException('Mật khẩu hiện tại không chính xác');
       }
 
-      // Cập nhật thông tin tài khoản
       const updateData: any = {};
 
-      // Cập nhật mật khẩu nếu được cung cấp
       if (updatePassword.newPassword) {
         const hashedPassword = await bcrypt.hash(
           updatePassword.newPassword,
@@ -86,74 +54,76 @@ export class AccountService {
         updateData.password = hashedPassword;
       }
 
-      // Thực hiện cập nhật
       const updatedAccount = await this.prisma.account.update({
-        where: { id },
+        where: { id: accountId },
         data: updateData,
       });
 
-      await this.redisService.del(`user:${account.id}`);
+      await this.redisService.del(`user:${accountId}`);
 
-      return this.mapToAccountDto(updatedAccount);
+      return this.mapToAccountDTO(updatedAccount);
     } catch (error) {
       this.logger.error(`Failed to update password: ${error.message}`);
       throw new UnauthorizedException('Cập nhật mật khẩu thất bại');
     }
   }
 
-  // async deleteAccount(id: string): Promise<void> {
-  //   // Kiểm tra xem tài khoản có tồn tại không
+  private mapToAccountDTO(account: Account): AccountResponseDTO {
+    const accountDTO: AccountResponseDTO = {
+      id: account.id,
+      email: account.email,
+      username: account.username,
+    };
+    return accountDTO;
+  }
+
+  // async findAccountById(id: string): Promise<AccountWithProfileResponseDTO> {
   //   const account = await this.prisma.account.findUnique({
   //     where: { id },
+  //     include: { profile: true },
   //   });
-
   //   if (!account) {
   //     throw new NotFoundException(`Không tìm thấy tài khoản với ID: ${id}`);
   //   }
-
-  //   // Xóa tài khoản (cascade sẽ xóa profile và các dữ liệu liên quan)
-  //   await this.prisma.account.delete({
-  //     where: { id },
-  //   });
+  //   return this.mapToAccountWithProfileDTO(account);
   // }
 
-  // Helper methods
-  private mapToAccountDto(account: Account): AccountResponseDto {
-    const accountDto: AccountResponseDto = {
-      id: account.id,
-      email: account.email,
-      username: account.username,
-      role: account.role,
-      createdAt: account.createdAt,
-      updatedAt: account.updatedAt,
-    };
-    return accountDto;
-  }
+  // async findAccountByUsername(
+  //   username: string,
+  // ): Promise<AccountWithProfileResponseDTO> {
+  //   const account = await this.prisma.account.findUnique({
+  //     where: { username },
+  //     include: { profile: true },
+  //   });
 
-  private mapToAccountWithProfileDTO(
-    account: any,
-  ): AccountWithProfileResponseDto {
-    const accountWithProfileDto: AccountWithProfileResponseDto = {
-      id: account.id,
-      email: account.email,
-      username: account.username,
-      role: account.role,
-      createdAt: account.createdAt,
-      updatedAt: account.updatedAt,
-      profile: account.profile
-        ? {
-            id: account.profile.id,
-            accountId: account.profile.accountId,
-            name: account.profile.name,
-            avatar: account.profile.avatar,
-            bio: account.profile.bio,
-            phone: account.profile.phone,
-            birthday: account.profile.birthday,
-            createdAt: account.profile.createdAt,
-            updatedAt: account.profile.updatedAt,
-          }
-        : null,
-    };
-    return accountWithProfileDto;
-  }
+  //   if (!account) {
+  //     throw new NotFoundException(
+  //       `Không tìm thấy tài khoản với username: ${username}`,
+  //     );
+  //   }
+
+  //   return this.mapToAccountWithProfileDTO(account);
+  // }
+
+  // private mapToAccountWithProfileDTO(
+  //   account: any,
+  // ): AccountWithProfileResponseDTO {
+  //   const accountWithProfileDTO: AccountWithProfileResponseDTO = {
+  //     id: account.id,
+  //     email: account.email,
+  //     username: account.username,
+  //     profile: account.profile
+  //       ? {
+  //           id: account.profile.id,
+  //           accountId: account.profile.accountId,
+  //           name: account.profile.name,
+  //           avatar: account.profile.avatar,
+  //           bio: account.profile.bio,
+  //           phone: account.profile.phone,
+  //           birthday: account.profile.birthday,
+  //         }
+  //       : null,
+  //   };
+  //   return accountWithProfileDTO;
+  // }
 }

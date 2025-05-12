@@ -3,40 +3,52 @@ import {
   Controller,
   Delete,
   Get,
-  HttpCode,
   HttpStatus,
   Logger,
   Param,
   Post,
   Put,
+  Req,
   Request,
+  Res,
   UploadedFile,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import {
+  ApiBadRequestResponse,
   ApiBearerAuth,
   ApiBody,
   ApiConsumes,
+  ApiOkResponse,
   ApiOperation,
   ApiParam,
   ApiResponse,
   ApiTags,
+  ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 
+import { Response } from 'express';
 import { JwtAuthGuard } from 'src/auth/guards/auth.guard';
-import { ProfileService } from 'src/profile/profile.service';
+import { ProfileService } from 'src/profile/services/profile';
+import { errorResponse, successResponse } from 'src/utils/api.response.factory';
 import {
-  AddParticipantDto,
-  CreateGroupDto,
-  GroupResponseDto,
-  UpdateGroupAvatarDto,
+  SwaggerErrorResponse,
+  SwaggerSuccessResponse,
+} from 'src/utils/swagger.helper';
+import {
+  ChangeOwnerDTO,
+  CreateGroupDTO,
+  GroupIdResponseDTO,
+  GroupResponseDTO,
+  ParticipantIdsDTO,
+  RenameGroupDTO,
+  UpdateGroupAvatarDTO,
 } from './dto';
-import { GroupService } from './group.service';
-
+import { GroupService } from './services/group';
 @ApiTags('Group')
-@ApiBearerAuth('JWT-auth')
+@ApiBearerAuth('JWT-AUTH')
 @Controller('group')
 export class GroupController {
   private readonly logger = new Logger(GroupController.name);
@@ -47,138 +59,228 @@ export class GroupController {
 
   @Post()
   @UseGuards(JwtAuthGuard)
-  @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: 'Tạo nhóm mới hoặc cuộc trò chuyện trực tiếp' })
-  @ApiResponse({
-    status: HttpStatus.CREATED,
+  @ApiOperation({ summary: 'Tạo nhóm' })
+  @ApiOkResponse({
     description: 'Nhóm đã được tạo thành công',
-    type: GroupResponseDto,
+    type: SwaggerSuccessResponse('Create_Group', 'group', GroupIdResponseDTO),
   })
-  async createGroup(@Request() req, @Body() createGroupDto: CreateGroupDto) {
-    const accountId = req.account.id;
-    if (createGroupDto.name) {
-      return this.groupService.createGroup(
-        accountId,
-        createGroupDto.participantIds,
-        true,
-        createGroupDto.name,
+  @ApiUnauthorizedResponse({
+    description: 'Không có quyền truy cập',
+    type: SwaggerErrorResponse(
+      HttpStatus.UNAUTHORIZED,
+      'Không có quyền truy cập',
+      'Create_Group',
+      'group',
+    ),
+  })
+  @ApiBadRequestResponse({
+    description: 'Dữ liệu không hợp lệ',
+    type: SwaggerErrorResponse(
+      HttpStatus.BAD_REQUEST,
+      'Dữ liệu không hợp lệ',
+      'Create_Group',
+      'group',
+    ),
+  })
+  async createGroup(
+    @Request() req,
+    @Body() createGroupDTO: CreateGroupDTO,
+    @Res() res: Response,
+  ) {
+    try {
+      const accountId = req.account.id;
+      const profile =
+        await this.profileService.getProfileFromAccountId(accountId);
+      if (!profile) {
+        throw new Error('Profile not found');
+      }
+      const result = await this.groupService.createGroup(
+        profile.id,
+        createGroupDTO.participantIds,
+        createGroupDTO.name,
       );
-    } else {
-      return this.groupService.createGroup(
-        accountId,
-        createGroupDto.participantIds,
-      );
+      return res
+        .status(HttpStatus.OK)
+        .send(successResponse(result, 'Tạo nhóm thành công'));
+    } catch (error) {
+      this.logger.error(`Error creating group: ${error.message}`);
+      return res
+        .status(HttpStatus.BAD_REQUEST)
+        .send(errorResponse('Tạo nhóm thất bại', 400, error.message));
     }
   }
 
   @Get()
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Lấy danh sách nhóm của người dùng hiện tại' })
-  @ApiResponse({
-    status: HttpStatus.OK,
+  @ApiOkResponse({
     description: 'Danh sách nhóm',
-    type: [GroupResponseDto],
+    type: SwaggerSuccessResponse('Get_Groups', 'group', GroupResponseDTO, true),
   })
-  async getGroups(@Request() req) {
-    const accountId = req.account.id;
-    return this.groupService.getGroupByAccountId(accountId);
+  @ApiBadRequestResponse({
+    description: 'Lấy danh sách nhóm thất bại',
+    type: SwaggerErrorResponse(
+      HttpStatus.BAD_REQUEST,
+      'Lấy danh sách nhóm thất bại',
+      'Get_Groups',
+      'group',
+    ),
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Không có quyền truy cập',
+    type: SwaggerErrorResponse(
+      HttpStatus.UNAUTHORIZED,
+      'Không có quyền truy cập',
+      'Get_Groups',
+      'group',
+    ),
+  })
+  async getGroups(@Request() req, @Res() res: Response) {
+    try {
+      const accountId = req.account.id;
+      const profile =
+        await this.profileService.getProfileFromAccountId(accountId);
+      if (!profile) {
+        throw new Error('Profile not found');
+      }
+      const result = await this.groupService.getGroup(profile.id);
+      return res
+        .status(HttpStatus.OK)
+        .send(successResponse(result, 'Lấy danh sách nhóm thành công'));
+    } catch (error) {
+      return res
+        .status(HttpStatus.BAD_REQUEST)
+        .send(errorResponse('Lấy danh sách nhóm thất bại', 400, error.message));
+    }
   }
 
   @Put(':groupId/participant')
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Thêm thành viên vào nhóm' })
-  @ApiParam({ name: 'groupId', description: 'ID của nhóm' })
-  @ApiResponse({
-    status: HttpStatus.OK,
+  @ApiOkResponse({
     description: 'Thành viên đã được thêm vào nhóm',
+    type: SwaggerSuccessResponse(
+      'Add_Participant',
+      'group',
+      GroupIdResponseDTO,
+    ),
+  })
+  @ApiBadRequestResponse({
+    description: 'Thêm thành viên vào nhóm thất bại',
+    type: SwaggerErrorResponse(
+      HttpStatus.BAD_REQUEST,
+      'Thêm thành viên vào nhóm thất bại',
+      'Add_Participant',
+      'group',
+    ),
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Không có quyền truy cập',
+    type: SwaggerErrorResponse(
+      HttpStatus.UNAUTHORIZED,
+      'Không có quyền truy cập',
+      'Add_Participant',
+      'group',
+    ),
   })
   async addParticipant(
     @Request() req,
     @Param('groupId') groupId: string,
-    @Body() body: AddParticipantDto,
+    @Body() body: ParticipantIdsDTO,
+    @Res() res: Response,
   ) {
     try {
       const accountId = req.account.id;
-      const isOwner = await this.groupService.isGroupOwner(accountId, groupId);
-      this.logger.debug(
-        `Account ID: ${accountId}, Group ID: ${groupId}, Is Owner: ${isOwner}`,
-      );
-      if (body.participantIds.length === 0)
-        return {
-          statusCode: HttpStatus.BAD_REQUEST,
-          message: 'Vui lòng chọn user cần thêm vào nhóm',
-        };
-      if (isOwner) {
-        return this.groupService.addParticipant(
-          groupId,
-          accountId,
-          body.participantIds,
-        );
-      } else {
-        return {
-          statusCode: HttpStatus.FORBIDDEN,
-          message: 'Bạn không có quyền thêm thành viên vào nhóm này',
-        };
+      const profile =
+        await this.profileService.getProfileFromAccountId(accountId);
+      if (!profile) {
+        throw new Error('Profile not found');
       }
+      const result = await this.groupService.addParticipant(
+        groupId,
+        profile.id,
+        body.participantIds,
+      );
+      return res
+        .status(HttpStatus.OK)
+        .send(successResponse(result, 'Thêm thành viên vào nhóm thành công'));
     } catch (error: any) {
-      return {
-        statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
-        message: error.message || 'Đã xảy ra lỗi khi thêm thành viên vào nhóm',
-      };
+      return res
+        .status(HttpStatus.BAD_REQUEST)
+        .send(
+          errorResponse(
+            'Thêm thành viên vào nhóm thất bại',
+            400,
+            error.message,
+          ),
+        );
     }
   }
 
   @Delete(':groupId/participant')
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Xóa thành viên khỏi nhóm' })
-  @ApiParam({ name: 'groupId', description: 'ID của nhóm' })
-  @ApiParam({ name: 'participantId', description: 'ID của thành viên cần xóa' })
-  @ApiResponse({
-    status: HttpStatus.OK,
-    description: 'Thành viên đã bị xóa khỏi nhóm',
+  @ApiOkResponse({
+    description: 'Thành viên đã được xóa khỏi nhóm',
+    type: SwaggerSuccessResponse(
+      'Remove_Participant',
+      'group',
+      GroupIdResponseDTO,
+    ),
+  })
+  @ApiBadRequestResponse({
+    description: 'Xóa thành viên khỏi nhóm thất bại',
+    type: SwaggerErrorResponse(
+      HttpStatus.BAD_REQUEST,
+      'Xóa thành viên khỏi nhóm thất bại',
+      'Remove_Participant',
+      'group',
+    ),
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Không có quyền truy cập',
+    type: SwaggerErrorResponse(
+      HttpStatus.UNAUTHORIZED,
+      'Không có quyền truy cập',
+      'Remove_Participant',
+      'group',
+    ),
   })
   async removeParticipant(
-    @Request() req,
+    @Req() req,
     @Param('groupId') groupId: string,
-    @Body() body: { participantIds: string[] },
+    @Body() body: ParticipantIdsDTO,
+    @Res() res: Response,
   ) {
     try {
       const accountId = req.account.id;
-      const isOwner = await this.groupService.isGroupOwner(accountId, groupId);
-      this.logger.debug(
-        `Account ID: ${accountId}, Group ID: ${groupId}, Is Owner: ${isOwner}`,
-      );
-      if (body.participantIds.length === 0)
-        return {
-          statusCode: HttpStatus.BAD_REQUEST,
-          message: 'Vui lòng chọn user cần xóa khỏi nhóm',
-        };
-      if (isOwner) {
-        const result = await this.groupService.removeParticipants(
-          groupId,
-          accountId,
-          body.participantIds,
-        );
-
-        // If there were non-members, include them in the response
-        if (result.nonMembers) {
-          this.logger.debug(
-            `Some users were not members of the group: ${JSON.stringify(result.nonMembers)}`,
-          );
-        }
-
-        return result;
-      } else {
-        return {
-          statusCode: HttpStatus.FORBIDDEN,
-          message: 'Bạn không có quyền xóa thành viên khỏi nhóm này',
-        };
+      const profile =
+        await this.profileService.getProfileFromAccountId(accountId);
+      if (!profile) {
+        throw new Error('Profile not found');
       }
+      const result = await this.groupService.removeParticipants(
+        groupId,
+        profile.id,
+        body.participantIds,
+      );
+      return res
+        .status(HttpStatus.OK)
+        .send(successResponse(result, 'Xóa thành viên khỏi nhóm thành công'));
     } catch (error: any) {
-      return {
-        statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
-        message: error.message || 'Đã xảy ra lỗi khi xóa thành viên khỏi nhóm',
-      };
+      this.logger.error(
+        `Error removing participants from group: ${error.message}`,
+        error.stack,
+      );
+      return res
+        .status(HttpStatus.BAD_REQUEST)
+        .send(
+          errorResponse(
+            'Xóa thành viên khỏi nhóm thất bại',
+            400,
+            error.message,
+          ),
+        );
     }
   }
 
@@ -186,37 +288,72 @@ export class GroupController {
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Xóa nhóm' })
   @ApiParam({ name: 'groupId', description: 'ID của nhóm cần xóa' })
-  @ApiResponse({
-    status: HttpStatus.OK,
+  @ApiOkResponse({
     description: 'Nhóm đã được xóa thành công',
+    type: SwaggerSuccessResponse('Delete_Group', 'group', GroupIdResponseDTO),
   })
-  async deleteGroup(@Request() req, @Param('groupId') groupId: string) {
-    const accountId = req.account.id;
-    return this.groupService.deleteGroup(groupId, accountId);
+  @ApiBadRequestResponse({
+    description: 'Xóa nhóm thất bại',
+    type: SwaggerErrorResponse(
+      HttpStatus.BAD_REQUEST,
+      'Xóa nhóm thất bại',
+      'Delete_Group',
+      'group',
+    ),
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Không có quyền truy cập',
+    type: SwaggerErrorResponse(
+      HttpStatus.UNAUTHORIZED,
+      'Không có quyền truy cập',
+      'Delete_Group',
+      'group',
+    ),
+  })
+  async deleteGroup(
+    @Request() req,
+    @Param('groupId') groupId: string,
+    @Res() res: Response,
+  ) {
+    try {
+      const accountId = req.account.id;
+      const profile =
+        await this.profileService.getProfileFromAccountId(accountId);
+
+      const result = await this.groupService.deleteGroup(groupId, profile.id);
+      return res
+        .status(HttpStatus.OK)
+        .send(successResponse(result, 'Xóa nhóm thành công'));
+    } catch (error: any) {
+      return res
+        .status(HttpStatus.BAD_REQUEST)
+        .send(errorResponse('Xóa nhóm thất bại', 400, error.message));
+    }
   }
 
   @Delete(':groupId/leave')
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Rời khỏi nhóm' })
   @ApiParam({ name: 'groupId', description: 'ID của nhóm muốn rời' })
-  @ApiResponse({
-    status: HttpStatus.OK,
-    description: 'Đã rời khỏi nhóm thành công',
-  })
-  @ApiResponse({
-    status: HttpStatus.BAD_REQUEST,
-    description:
-      'Không thể rời khỏi nhóm (không phải nhóm hoặc bạn là chủ nhóm)',
-  })
-  async leaveGroup(@Request() req, @Param('groupId') groupId: string) {
+  async leaveGroup(
+    @Request() req,
+    @Param('groupId') groupId: string,
+    @Res() res: Response,
+  ) {
     try {
       const accountId = req.account.id;
-      return this.groupService.leaveGroup(groupId, accountId);
+      const profile =
+        await this.profileService.getProfileFromAccountId(accountId);
+
+      const result = await this.groupService.leaveGroup(groupId, profile.id);
+      return res
+        .status(HttpStatus.OK)
+        .send(successResponse(result, 'Rời khỏi nhóm thành công'));
     } catch (error: any) {
-      return {
-        statusCode: HttpStatus.BAD_REQUEST,
-        message: error.message || 'Đã xảy ra lỗi khi rời khỏi nhóm',
-      };
+      this.logger.error(`Error leaving group: ${error.message}`, error.stack);
+      return res
+        .status(HttpStatus.BAD_REQUEST)
+        .send(errorResponse('Rời khỏi nhóm thất bại', 400, error.message));
     }
   }
 
@@ -224,53 +361,77 @@ export class GroupController {
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Chuyển quyền chủ nhóm' })
   @ApiParam({ name: 'groupId', description: 'ID của nhóm' })
-  @ApiResponse({
-    status: HttpStatus.OK,
-    description: 'Đã chuyển quyền chủ nhóm thành công',
+  @ApiOkResponse({
+    description: 'Quyền chủ nhóm đã được chuyển thành công',
+    type: SwaggerSuccessResponse(
+      'Transfer_Ownership',
+      'group',
+      GroupIdResponseDTO,
+    ),
   })
-  @ApiResponse({
-    status: HttpStatus.BAD_REQUEST,
-    description: 'Không thể chuyển quyền chủ nhóm',
+  @ApiBadRequestResponse({
+    description: 'Chuyển quyền chủ nhóm thất bại',
+    type: SwaggerErrorResponse(
+      HttpStatus.BAD_REQUEST,
+      'Chuyển quyền chủ nhóm thất bại',
+      'Transfer_Ownership',
+      'group',
+    ),
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Không có quyền truy cập',
+    type: SwaggerErrorResponse(
+      HttpStatus.UNAUTHORIZED,
+      'Không có quyền truy cập',
+      'Transfer_Ownership',
+      'group',
+    ),
   })
   async transferOwnership(
-    @Request() req,
+    @Req() req,
     @Param('groupId') groupId: string,
-    @Body() body: { newOwnerId: string },
+    @Body() body: ChangeOwnerDTO,
+    @Res() res: Response,
   ) {
     try {
       const accountId = req.account.id;
-      if (!body.newOwnerId) {
-        return {
-          statusCode: HttpStatus.BAD_REQUEST,
-          message: 'Vui lòng chọn thành viên để chuyển quyền chủ nhóm',
-        };
-      }
-      return this.groupService.transferOwnership(
+      const profile =
+        await this.profileService.getProfileFromAccountId(accountId);
+
+      const result = await this.groupService.transferOwnership(
         groupId,
-        accountId,
+        profile.id,
         body.newOwnerId,
       );
+      return res
+        .status(HttpStatus.OK)
+        .send(successResponse(result, 'Chuyển quyền chủ nhóm thành công'));
     } catch (error: any) {
-      return {
-        statusCode: HttpStatus.BAD_REQUEST,
-        message: error.message || 'Đã xảy ra lỗi khi chuyển quyền chủ nhóm',
-      };
+      this.logger.error(
+        `Error transferring ownership: ${error.message}`,
+        error.stack,
+      );
+      return res
+        .status(HttpStatus.BAD_REQUEST)
+        .send(
+          errorResponse('Chuyển quyền chủ nhóm thất bại', 400, error.message),
+        );
     }
   }
 
-  @Get('search/:keyword')
-  @UseGuards(JwtAuthGuard)
-  @ApiOperation({ summary: 'Tìm kiếm nhóm theo tên' })
-  @ApiParam({ name: 'keyword', description: 'Từ khóa tìm kiếm' })
-  @ApiResponse({
-    status: HttpStatus.OK,
-    description: 'Danh sách nhóm phù hợp với từ khóa tìm kiếm',
-    type: [GroupResponseDto],
-  })
-  async searchGroups(@Request() req, @Param('keyword') keyword: string) {
-    const accountId = req.account.id;
-    return this.groupService.searchGroups(accountId, keyword);
-  }
+  // @Get('search/:keyword')
+  // @UseGuards(JwtAuthGuard)
+  // @ApiOperation({ summary: 'Tìm kiếm nhóm theo tên' })
+  // @ApiParam({ name: 'keyword', description: 'Từ khóa tìm kiếm' })
+  // @ApiResponse({
+  //   status: HttpStatus.OK,
+  //   description: 'Danh sách nhóm phù hợp với từ khóa tìm kiếm',
+  //   type: [GroupResponseDTO],
+  // })
+  // async searchGroups(@Request() req, @Param('keyword') keyword: string) {
+  //   const accountId = req.account.id;
+  //   return this.groupService.searchGroups(accountId, keyword);
+  // }
 
   @Get(':groupId')
   @UseGuards(JwtAuthGuard)
@@ -279,29 +440,49 @@ export class GroupController {
   @ApiResponse({
     status: HttpStatus.OK,
     description: 'Thông tin chi tiết của nhóm',
-    type: GroupResponseDto,
+    type: SwaggerSuccessResponse('Get_Group_Info', 'group', GroupResponseDTO),
   })
   @ApiResponse({
     status: HttpStatus.FORBIDDEN,
     description: 'Người dùng không phải là thành viên của nhóm',
+    type: SwaggerErrorResponse(
+      HttpStatus.FORBIDDEN,
+      'Người dùng không phải là thành viên của nhóm',
+      'Get_Group_Info',
+      'group',
+    ),
   })
-  async getGroupInfo(@Request() req: any, @Param('groupId') groupId: string) {
+  @ApiUnauthorizedResponse({
+    description: 'Không có quyền truy cập',
+    type: SwaggerErrorResponse(
+      HttpStatus.UNAUTHORIZED,
+      'Không có quyền truy cập',
+      'Get_Group_Info',
+      'group',
+    ),
+  })
+  async getGroupInfo(
+    @Req() req: any,
+    @Param('groupId') groupId: string,
+    @Res() res: Response,
+  ) {
     try {
       const accountId = req.account.id;
       const profile =
         await this.profileService.getProfileFromAccountId(accountId);
-      if (!profile) {
-        return {
-          statusCode: HttpStatus.BAD_REQUEST,
-          message: 'Người dùng không tồn tại',
-        };
-      }
-      return this.groupService.getGroupInfo(groupId, profile.id);
+
+      const result = await this.groupService.getGroupInfo(groupId, profile.id);
+      return res
+        .status(HttpStatus.OK)
+        .send(successResponse(result, 'Lấy thông tin nhóm thành công'));
     } catch (error: any) {
-      return {
-        statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
-        message: error.message || 'Đã xảy ra lỗi khi lấy thông tin nhóm',
-      };
+      this.logger.error(
+        `Error getting group info: ${error.message}`,
+        error.stack,
+      );
+      return res
+        .status(HttpStatus.BAD_REQUEST)
+        .send(errorResponse('Lấy thông tin nhóm thất bại', 400, error.message));
     }
   }
 
@@ -309,33 +490,52 @@ export class GroupController {
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Đổi tên nhóm' })
   @ApiParam({ name: 'groupId', description: 'ID của nhóm' })
-  @ApiResponse({
-    status: HttpStatus.OK,
+  @ApiOkResponse({
     description: 'Tên nhóm đã được đổi thành công',
+    type: SwaggerSuccessResponse('Rename_Group', 'group', GroupIdResponseDTO),
   })
-  @ApiResponse({
-    status: HttpStatus.BAD_REQUEST,
-    description: 'Không thể đổi tên nhóm',
+  @ApiBadRequestResponse({
+    description: 'Đổi tên nhóm thất bại',
+    type: SwaggerErrorResponse(
+      HttpStatus.BAD_REQUEST,
+      'Đổi tên nhóm thất bại',
+      'Rename_Group',
+      'group',
+    ),
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Không có quyền truy cập',
+    type: SwaggerErrorResponse(
+      HttpStatus.UNAUTHORIZED,
+      'Không có quyền truy cập',
+      'Rename_Group',
+      'group',
+    ),
   })
   async renameGroup(
-    @Request() req: any,
+    @Req() req: any,
     @Param('groupId') groupId: string,
-    @Body() body: { name: string },
+    @Body() body: RenameGroupDTO,
+    @Res() res: Response,
   ) {
     try {
       const accountId = req.account.id;
-      if (!body.name) {
-        return {
-          statusCode: HttpStatus.BAD_REQUEST,
-          message: 'Vui lòng nhập tên nhóm mới',
-        };
-      }
-      return this.groupService.renameGroup(groupId, accountId, body.name);
+      const profile =
+        await this.profileService.getProfileFromAccountId(accountId);
+
+      const result = await this.groupService.renameGroup(
+        groupId,
+        profile.id,
+        body.name,
+      );
+      return res
+        .status(HttpStatus.OK)
+        .send(successResponse(result, 'Đổi tên nhóm thành công'));
     } catch (error: any) {
-      return {
-        statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
-        message: error.message || 'Đã xảy ra lỗi khi đổi tên nhóm',
-      };
+      this.logger.error(`Error renaming group: ${error.message}`, error.stack);
+      return res
+        .status(HttpStatus.BAD_REQUEST)
+        .send(errorResponse('Đổi tên nhóm thất bại', 400, error.message));
     }
   }
 
@@ -345,20 +545,38 @@ export class GroupController {
   @ApiConsumes('multipart/form-data')
   @ApiOperation({ summary: 'Cập nhật avatar nhóm' })
   @ApiParam({ name: 'groupId', description: 'ID của nhóm' })
-  @ApiBody({ type: UpdateGroupAvatarDto })
-  @ApiResponse({
-    status: HttpStatus.OK,
+  @ApiBody({ type: UpdateGroupAvatarDTO })
+  @ApiOkResponse({
     description: 'Avatar nhóm đã được cập nhật thành công',
+    type: SwaggerSuccessResponse(
+      'Update_Group_Avatar',
+      'group',
+      GroupIdResponseDTO,
+    ),
   })
-  @ApiResponse({
-    status: HttpStatus.BAD_REQUEST,
-    description:
-      'Không thể cập nhật avatar nhóm (không phải nhóm hoặc bạn không phải chủ nhóm)',
+  @ApiBadRequestResponse({
+    description: 'Cập nhật avatar nhóm thất bại',
+    type: SwaggerErrorResponse(
+      HttpStatus.BAD_REQUEST,
+      'Cập nhật avatar nhóm thất bại',
+      'Update_Group_Avatar',
+      'group',
+    ),
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Không có quyền truy cập',
+    type: SwaggerErrorResponse(
+      HttpStatus.UNAUTHORIZED,
+      'Không có quyền truy cập',
+      'Update_Group_Avatar',
+      'group',
+    ),
   })
   async updateGroupAvatar(
     @Request() req,
     @Param('groupId') groupId: string,
     @UploadedFile() file: Express.Multer.File,
+    @Res() res: Response,
   ) {
     try {
       const accountId = req.account.id;
@@ -368,16 +586,27 @@ export class GroupController {
           message: 'Vui lòng chọn ảnh avatar cho nhóm',
         };
       }
-      return this.groupService.updateGroupAvatar(groupId, accountId, file);
+      const profile =
+        await this.profileService.getProfileFromAccountId(accountId);
+
+      const result = await this.groupService.updateGroupAvatar(
+        groupId,
+        profile.id,
+        file,
+      );
+      return res
+        .status(HttpStatus.OK)
+        .send(successResponse(result, 'Cập nhật avatar nhóm thành công'));
     } catch (error: any) {
       this.logger.error(
         `Lỗi cập nhật avatar nhóm: ${error.message}`,
         error.stack,
       );
-      return {
-        statusCode: HttpStatus.BAD_REQUEST,
-        message: error.message || 'Đã xảy ra lỗi khi cập nhật avatar nhóm',
-      };
+      return res
+        .status(HttpStatus.BAD_REQUEST)
+        .send(
+          errorResponse('Cập nhật avatar nhóm thất bại', 400, error.message),
+        );
     }
   }
 }

@@ -4,6 +4,7 @@ import { JwtService } from '@nestjs/jwt';
 import { Account } from '@prisma/client';
 import * as crypto from 'crypto';
 import { PrismaService } from 'src/config/prisma/prisma.service';
+import { USER_DEVICE_INFO } from 'src/config/redis/key';
 import { RedisService } from 'src/config/redis/redis.service';
 import { DeviceData, JwtPayload } from './interfaces/jwt.interface';
 
@@ -41,24 +42,28 @@ export class TokenService {
     return value;
   }
 
-  async generateAccessToken(account: Account): Promise<string> {
-    const tokenId = crypto.randomBytes(16).toString('hex');
-    const payload: JwtPayload = {
-      sub: account.id,
-      username: account.username,
-      role: account.role,
-      type: 'access',
-      jti: tokenId,
-    };
-
+  async generateAccessToken(
+    account: Account,
+    profileId: string,
+  ): Promise<string> {
     try {
+      const tokenId = crypto.randomBytes(16).toString('hex');
+      const payload: JwtPayload = {
+        sub: account.id,
+        profileId,
+        username: account.username,
+        role: account.role,
+        type: 'access',
+        jti: tokenId,
+      };
+
       return this.jwtService.sign(payload, {
         secret: this.accessSecret,
         expiresIn: this.accessExpiresIn,
       });
     } catch (error) {
       this.logger.error(`Failed to generate access token: ${error.message}`);
-      throw new UnauthorizedException('Could not generate access token');
+      throw new Error('Could not generate access token');
     }
   }
 
@@ -85,11 +90,10 @@ export class TokenService {
         throw new UnauthorizedException('Token has been revoked');
       }
 
-      // Kiểm tra device trong Redis
-      const userKey = `user:${payload.sub}`;
       const deviceData: DeviceData | null =
-        await this.redisService.hget<DeviceData>(userKey, deviceId);
-
+        await this.redisService.get<DeviceData>(
+          USER_DEVICE_INFO(payload.profileId, deviceId),
+        );
       if (!deviceData) {
         throw new UnauthorizedException('Device unknown');
       }
@@ -132,40 +136,40 @@ export class TokenService {
 
   async generateRefreshToken({
     account,
+    profileId,
     deviceId,
     ip,
     fcmToken,
     existingToken,
   }: {
     account: Account;
+    profileId: string;
     deviceId: string;
     ip: string;
     fcmToken?: string;
     existingToken?: string;
-  }): Promise<string | null> {
-    const { expiresIn, ttl } = this.calculateTokenExpiration(existingToken);
-    const tokenId = crypto.randomBytes(16).toString('hex');
-    const payload: JwtPayload = {
-      sub: account.id,
-      username: account.username,
-      role: account.role,
-      type: 'refresh',
-      jti: tokenId,
-    };
-
+  }): Promise<string> {
     try {
+      const { expiresIn, ttl } = this.calculateTokenExpiration(existingToken);
+      const tokenId = crypto.randomBytes(16).toString('hex');
+      const payload: JwtPayload = {
+        sub: account.id,
+        username: account.username,
+        profileId,
+        role: account.role,
+        type: 'refresh',
+        jti: tokenId,
+      };
+
       const token = this.jwtService.sign(payload, {
         secret: this.refreshSecret,
         expiresIn,
       });
+      const key = USER_DEVICE_INFO(profileId, deviceId);
 
-      const updated = await this.updateDeviceInRedis(
-        account.id,
-        deviceId,
-        { ip, fcmToken, token },
-        ttl,
-      );
-      return updated ? token : null;
+      await this.redisService.set(key, { ip, fcmToken, token }, ttl);
+
+      return token;
     } catch (error) {
       this.logger.error(`Failed to generate refresh token: ${error.message}`);
       throw new UnauthorizedException('Failed to generate refresh token');
@@ -204,33 +208,33 @@ export class TokenService {
   }
 
   private async updateDeviceInRedis(
-    accountId: string,
+    profileId: string,
     deviceId: string,
     data: { ip: string; fcmToken?: string; token: string },
     ttl: number,
   ): Promise<boolean> {
-    const userKey = `user:${accountId}`;
+    const userKey = `user:${profileId}`;
     const currentDevice: DeviceData | null =
-      await this.redisService.hget<DeviceData>(userKey, deviceId);
+      await this.redisService.get<DeviceData>(
+        USER_DEVICE_INFO(profileId, deviceId),
+      );
 
     const deviceData: DeviceData = {
       ...currentDevice,
       ip: data.ip,
-      ...(data.fcmToken && { fcmToken: data.fcmToken }),
-      lastLogin: new Date().toISOString(),
-      refreshToken: data.token,
+      fcmToken: data.fcmToken || '',
+      token: data.token,
     };
 
     if (currentDevice) {
-      await this.revokeRefreshToken(
-        currentDevice.refreshToken,
-        deviceId,
-        data.ip,
-      );
+      await this.revokeRefreshToken(currentDevice.token, deviceId, data.ip);
     }
 
-    await this.redisService.hset(userKey, deviceId, JSON.stringify(deviceData));
-    if (ttl) await this.redisService.expire(userKey, ttl);
+    await this.redisService.set(
+      USER_DEVICE_INFO(profileId, deviceId),
+      JSON.stringify(deviceData),
+      ttl,
+    );
 
     return true;
   }
@@ -241,17 +245,20 @@ export class TokenService {
         secret: this.refreshSecret,
       });
 
-      if (payload.type !== 'refresh' || !payload.sub) {
+      if (payload.type !== 'refresh' || !payload.sub || !payload.profileId) {
         throw new UnauthorizedException('Invalid token format');
       }
 
-      const userKey = `user:${payload.sub}`;
-      // Lấy dữ liệu của field deviceId từ hash
       const deviceData: DeviceData | null =
-        await this.redisService.hget<DeviceData>(userKey, deviceId);
+        await this.redisService.get<DeviceData>(
+          USER_DEVICE_INFO(payload.profileId, deviceId),
+        );
+      if (!deviceData) {
+        throw new UnauthorizedException('Cannot get device data');
+      }
 
-      if (!deviceData || deviceData.refreshToken !== token) {
-        throw new UnauthorizedException('Invalid or unknown refresh token');
+      if (deviceData.token !== token) {
+        throw new UnauthorizedException('Invalid refresh token');
       }
 
       const account = await this.prismaService.account.findUnique({
@@ -275,28 +282,25 @@ export class TokenService {
   ): Promise<void> {
     try {
       const payload = this.jwtService.decode<JwtPayload>(token);
-      if (!payload?.sub) throw new Error('Invalid token: missing user ID');
-
-      this.logger.debug(
-        `Decoding refresh token for revocation - User ID: ${payload.sub}, Device: ${deviceId}`,
-      );
-
-      const userKey = `user:${payload.sub}`;
+      if (!payload?.sub || !payload?.profileId)
+        throw new Error('Invalid token: missing user ID or profile ID');
       const deviceData: DeviceData | null =
-        await this.redisService.hget<DeviceData>(userKey, deviceId);
+        await this.redisService.get<DeviceData>(
+          USER_DEVICE_INFO(payload.profileId, deviceId),
+        );
 
       if (!deviceData) {
         this.logger.warn(
-          `Device ${deviceId} not found for user ${payload.sub}`,
+          `Device ${deviceId} not found for user ${payload.profileId}`,
         );
-        return; // Just return without error as the device is already not in Redis
+        return;
       }
 
-      if (deviceData.refreshToken !== token) {
+      if (deviceData.token !== token) {
         this.logger.warn(
           `Token mismatch for device ${deviceId}: stored token doesn't match provided token`,
         );
-        return; // No need to revoke if tokens don't match
+        return;
       }
 
       if (deviceData.ip !== ip) {
@@ -306,9 +310,11 @@ export class TokenService {
         // Continue with revocation despite IP mismatch for security
       }
 
-      await this.redisService.hdel(userKey, deviceId);
+      await this.redisService.del(
+        USER_DEVICE_INFO(payload.profileId, deviceId),
+      );
       this.logger.debug(
-        `Revoked refresh token for device ${deviceId} of user ${payload.sub}`,
+        `Revoked refresh token for device ${deviceId} of user ${payload.profileId}`,
       );
     } catch (error) {
       this.logger.error(`Failed to revoke refresh token: ${error.message}`);
@@ -316,27 +322,28 @@ export class TokenService {
     }
   }
 
-  async removeDeviceById(userId: string, deviceId: string): Promise<void> {
+  async removeDeviceById(profileId: string, deviceId: string): Promise<void> {
     try {
-      const userKey = `user:${userId}`;
+      const userKey = `user:${profileId}`;
       // Debug the incoming user ID to find potential mismatches
       this.logger.debug(
-        `Removing device with userId: ${userId}, deviceId: ${deviceId}`,
+        `Removing device with profileId: ${profileId}, deviceId: ${deviceId}`,
       );
 
-      // Check if the device exists before attempting to delete
-      const deviceExists = await this.redisService.hexists(userKey, deviceId);
-      if (deviceExists) {
-        await this.redisService.hdel(userKey, deviceId);
+      // Kiểm tra xem thiết bị có tồn tại không trước khi xóa
+      const deviceData = await this.redisService.get(
+        USER_DEVICE_INFO(profileId, deviceId),
+      );
+      if (deviceData) {
+        await this.redisService.del(USER_DEVICE_INFO(profileId, deviceId));
         this.logger.debug(
-          `Removed device ${deviceId} for user ${userId} from Redis`,
+          `Removed device ${deviceId} for user ${profileId} from Redis`,
         );
       } else {
-        this.logger.debug(`Device ${deviceId} not found for user ${userId}`);
+        this.logger.debug(`Device ${deviceId} not found for user ${profileId}`);
       }
     } catch (error) {
       this.logger.error(`Failed to remove device: ${error.message}`);
-      // Don't throw the error to avoid blocking the logout process
     }
   }
 
@@ -354,16 +361,17 @@ export class TokenService {
   }
 
   async getFCMToken(
-    accountId: string,
+    profileId: string,
     deviceId: string,
   ): Promise<string | null> {
     try {
-      const userKey = `user:${accountId}`;
       const deviceData: DeviceData | null =
-        await this.redisService.hget<DeviceData>(userKey, deviceId);
+        await this.redisService.get<DeviceData>(
+          USER_DEVICE_INFO(profileId, deviceId),
+        );
 
       if (!deviceData) {
-        this.logger.debug(`Device ${deviceId} not found for user ${accountId}`);
+        this.logger.debug(`Device ${deviceId} not found for user ${profileId}`);
         return null;
       }
 
@@ -374,22 +382,45 @@ export class TokenService {
     }
   }
 
-  async getAllFCMTokens(accountId: string): Promise<string[]> {
+  async getAllFCMTokens(profileId: string): Promise<string[]> {
     try {
-      const userKey = `user:${accountId}`;
-      const allDevices = await this.redisService.hgetall(userKey);
+      const userKey = `user:${profileId}`;
+      this.logger.debug(`Đang lấy tất cả FCM tokens cho user ${profileId}`);
+      // Lấy tất cả các thiết bị từ Redis bằng cách sử dụng các key riêng lẻ
+      const deviceKeys = await this.redisService.keys(`${userKey}:*`);
+      this.logger.debug(
+        `Tìm thấy ${deviceKeys.length} thiết bị cho user ${profileId}`,
+      );
 
-      if (!allDevices) {
-        this.logger.debug(`No devices found for user ${accountId}`);
+      if (!deviceKeys || deviceKeys.length === 0) {
+        this.logger.debug(`Không tìm thấy thiết bị nào cho user ${profileId}`);
         return [];
       }
+
+      // Lấy dữ liệu cho mỗi thiết bị
+      const allDevices = {};
+      for (const key of deviceKeys) {
+        const deviceId = key.split(':').pop();
+        const deviceData = await this.redisService.get(key);
+        if (deviceData && deviceId) {
+          allDevices[deviceId] = deviceData;
+        }
+      }
+
+      this.logger.debug(
+        `Danh sách thiết bị: ${JSON.stringify(Object.keys(allDevices))}`,
+      );
 
       const fcmTokens = Object.values(allDevices)
         .map((deviceDataStr) => {
           try {
-            const deviceData: DeviceData = JSON.parse(deviceDataStr);
+            const deviceData: DeviceData = JSON.parse(deviceDataStr as string);
+            this.logger.debug(
+              `Đã parse dữ liệu thiết bị: ${JSON.stringify(deviceData)}`,
+            );
             return deviceData.fcmToken;
           } catch (e) {
+            this.logger.error(`Lỗi khi parse dữ liệu thiết bị: ${e.message}`);
             return null;
           }
         })
@@ -397,9 +428,14 @@ export class TokenService {
           (token): token is string => token !== null && token !== undefined,
         );
 
+      this.logger.debug(
+        `Đã tìm thấy ${fcmTokens.length} FCM tokens hợp lệ cho user ${profileId}`,
+      );
+      this.logger.debug(`Danh sách FCM tokens: ${JSON.stringify(fcmTokens)}`);
+
       return fcmTokens;
     } catch (error) {
-      this.logger.error(`Failed to get all FCM tokens: ${error.message}`);
+      this.logger.error(`Lỗi khi lấy tất cả FCM tokens: ${error.message}`);
       return [];
     }
   }

@@ -1,6 +1,7 @@
 export interface JwtPayload {
   username: string;
   role: string;
+  profileId: string;
   sub?: string;
   iat?: number;
   exp?: number;
@@ -10,9 +11,8 @@ export interface JwtPayload {
 
 export interface DeviceData {
   ip: string;
-  fcmToken?: string;
-  lastLogin: string;
-  refreshToken: string;
+  fcmToken: string;
+  token: string;
 }
 
 export interface UserDevices {

@@ -258,6 +258,27 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  async sismember(key: string, member: string): Promise<boolean> {
+    try {
+      const result = await this.redisClient.sismember(key, member);
+      this.logger.debug({
+        message: 'Checked if member exists in set',
+        key,
+        member,
+        exists: result === 1,
+      });
+      return result === 1;
+    } catch (error) {
+      this.logger.error({
+        message: 'Error checking member existence in set',
+        key,
+        member,
+        error: error.message,
+      });
+      throw error;
+    }
+  }
+
   async scard(key: string): Promise<number> {
     try {
       const count = await this.redisClient.scard(key);
@@ -311,115 +332,6 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
       this.logger.error({
         message: 'Error getting TTL for key',
         key,
-        error: error.message,
-      });
-      throw error;
-    }
-  }
-
-  // Hash operations
-  async hset(key: string, field: string, value: any): Promise<number> {
-    try {
-      const serialized = this.serialize(value);
-      const result = await this.redisClient.hset(key, field, serialized);
-      this.logger.debug({ message: 'Set hash field', key, field });
-      return result;
-    } catch (error) {
-      this.logger.error({
-        message: 'Error setting hash field',
-        key,
-        field,
-        error: error.message,
-      });
-      throw error;
-    }
-  }
-
-  async hget<T = any>(key: string, field: string): Promise<T | null> {
-    try {
-      const value = await this.redisClient.hget(key, field);
-      if (value === null) {
-        this.logger.debug({ message: 'Hash field not found', key, field });
-        return null;
-      }
-      return this.deserialize<T>(value);
-    } catch (error) {
-      this.logger.error({
-        message: 'Error getting hash field',
-        key,
-        field,
-        error: error.message,
-      });
-      throw error;
-    }
-  }
-
-  async hgetall<T = any>(key: string): Promise<Record<string, T> | null> {
-    try {
-      const data = await this.redisClient.hgetall(key);
-      if (!data || Object.keys(data).length === 0) {
-        this.logger.debug({ message: 'Hash not found or empty', key });
-        return null;
-      }
-
-      // Deserialize all values in the hash
-      const result: Record<string, T> = {};
-      for (const field in data) {
-        result[field] = this.deserialize<T>(data[field]);
-      }
-
-      this.logger.debug({
-        message: 'Retrieved all hash fields',
-        key,
-        count: Object.keys(result).length,
-      });
-      return result;
-    } catch (error) {
-      this.logger.error({
-        message: 'Error getting all hash fields',
-        key,
-        error: error.message,
-      });
-      throw error;
-    }
-  }
-
-  async hdel(key: string, ...fields: string[]): Promise<number> {
-    try {
-      const result = await this.redisClient.hdel(key, ...fields);
-      this.logger.debug({
-        message: 'Deleted hash fields',
-        key,
-        fields,
-        count: result,
-      });
-      return result;
-    } catch (error) {
-      this.logger.error({
-        message: 'Error deleting hash fields',
-        key,
-        fields,
-        error: error.message,
-      });
-      throw error;
-    }
-  }
-
-  async hexists(key: string, field: string): Promise<boolean> {
-    try {
-      const result = await this.redisClient.hexists(key, field);
-      this.logger.debug({
-        message: 'Checked if hash field exists',
-        key,
-        field,
-        exists: result === 1,
-      });
-      return result === 1;
-    } catch (error) {
-      this.logger.error({
-        message: 'Error checking hash field existence',
-        key,
-        field,
         error: error.message,
       });
       throw error;
@@ -480,6 +392,25 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
       return JSON.parse(value) as T;
     } catch {
       return value as unknown as T; // Fallback for non-JSON strings
+    }
+  }
+
+  async keys(pattern: string): Promise<string[]> {
+    try {
+      const keys = await this.redisClient.keys(pattern);
+      this.logger.debug({
+        message: 'Retrieved keys matching pattern',
+        pattern,
+        count: keys.length,
+      });
+      return keys;
+    } catch (error) {
+      this.logger.error({
+        message: 'Error getting keys with pattern',
+        pattern,
+        error: error.message,
+      });
+      throw error;
     }
   }
 }

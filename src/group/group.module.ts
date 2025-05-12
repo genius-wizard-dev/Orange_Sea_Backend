@@ -3,7 +3,7 @@ import { CloudinaryModule } from 'src/config/cloudinary/cloudinary.module';
 import { PrismaService } from 'src/config/prisma/prisma.service';
 import { ProfileModule } from 'src/profile/profile.module';
 import { GroupController } from './group.controller';
-import { GroupService } from './group.service';
+import { GroupService } from './services/group';
 
 @Module({
   imports: [ProfileModule, CloudinaryModule],

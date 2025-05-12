@@ -43,7 +43,7 @@ async function bootstrap() {
         description: 'Nhập token JWT của bạn',
         in: 'header',
       },
-      'JWT-auth',
+      'JWT-AUTH',
     )
     .build();
   const document = SwaggerModule.createDocument(app, config);

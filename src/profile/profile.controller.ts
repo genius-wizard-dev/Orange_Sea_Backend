@@ -2,29 +2,39 @@ import {
   Body,
   Controller,
   Get,
+  HttpStatus,
   Logger,
   Param,
   Put,
   Req,
+  Res,
   UploadedFile,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import {
+  ApiBadRequestResponse,
   ApiBearerAuth,
-  ApiBody,
   ApiConsumes,
+  ApiOkResponse,
   ApiOperation,
-  ApiResponse,
   ApiTags,
+  ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
+import { Response } from 'express';
+import { errorResponse, successResponse } from 'src/utils/api.response.factory';
+import {
+  SwaggerErrorResponse,
+  SwaggerSuccessResponse,
+} from 'src/utils/swagger.helper';
 import { JwtAuthGuard } from '../auth/guards/auth.guard';
+import { GetProfileDTO, GetProfileIdResponseDTO } from './dto/get.profile.dto';
 import { UpdateProfileDTO } from './dto/update.profile.dto';
-import { ProfileService } from './profile.service';
+import { ProfileService } from './services/profile';
 @ApiTags('Profile')
 @Controller('profile')
-@ApiBearerAuth('JWT-auth')
+@ApiBearerAuth('JWT-AUTH')
 export class ProfileController {
   private readonly logger = new Logger(ProfileController.name);
   constructor(private readonly profileService: ProfileService) {}
@@ -32,27 +42,47 @@ export class ProfileController {
   @UseGuards(JwtAuthGuard)
   @Get('me')
   @ApiOperation({ summary: 'Lấy thông tin profile của người dùng hiện tại' })
-  @ApiResponse({ status: 200, description: 'Lấy thông tin thành công' })
-  @ApiResponse({ status: 401, description: 'Không có quyền truy cập' })
-  async getMyProfile(@Req() req: any) {
-    this.logger.debug(`getMyProfile called for account: ${req.account.id}`);
+  @ApiOkResponse({
+    description: 'Lấy thông tin profile thành công',
+    type: SwaggerSuccessResponse('Get_My_Profile', 'profile', GetProfileDTO),
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Không có quyền truy cập',
+    type: SwaggerErrorResponse(
+      HttpStatus.UNAUTHORIZED,
+      'Không có quyền truy cập',
+      'Get_My_Profile',
+      'profile',
+    ),
+  })
+  @ApiBadRequestResponse({
+    description: 'Lấy thông tin profile thất bại',
+    type: SwaggerErrorResponse(
+      HttpStatus.BAD_REQUEST,
+      'Lấy thông tin profile thất bại',
+      'Get_My_Profile',
+      'profile',
+    ),
+  })
+  async getMyProfile(@Req() req: any, @Res() res: Response) {
     try {
-      this.logger.debug(`Getting profile with ID: ${req.account.profileId}`);
       const profile = await this.profileService.getProfileById(
         req.account.profileId,
       );
-      this.logger.debug(
-        `Profile retrieved successfully: ${JSON.stringify(profile)}`,
-      );
-      return {
-        status: 'success',
-        message: 'Lấy thông tin profile thành công',
-        data: profile,
-      };
+      return res
+        .status(HttpStatus.OK)
+        .send(successResponse(profile, 'Lấy thông tin profile thành công'));
     } catch (error) {
-      this.logger.error(`Error in getMyProfile: ${error.message}`);
-      this.logger.error(error.stack);
-      throw error;
+      this.logger.error(`Error in getMyProfile: ${error}`);
+      return res
+        .status(HttpStatus.BAD_REQUEST)
+        .send(
+          errorResponse(
+            'Lấy thông tin profile thất bại',
+            HttpStatus.BAD_REQUEST,
+            error.message,
+          ),
+        );
     }
   }
 
@@ -61,103 +91,140 @@ export class ProfileController {
   @UseInterceptors(FileInterceptor('avatar'))
   @ApiConsumes('multipart/form-data')
   @ApiOperation({ summary: 'Cập nhật profile của người dùng hiện tại' })
-  @ApiResponse({ status: 200, description: 'Cập nhật thành công' })
-  @ApiResponse({ status: 401, description: 'Không có quyền truy cập' })
-  @ApiBody({ type: UpdateProfileDTO })
+  @ApiOkResponse({
+    description: 'Cập nhật profile thành công',
+    type: SwaggerSuccessResponse(
+      'Update_My_Profile',
+      'profile',
+      GetProfileIdResponseDTO,
+    ),
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Không có quyền truy cập',
+    type: SwaggerErrorResponse(
+      HttpStatus.UNAUTHORIZED,
+      'Không có quyền truy cập',
+      'Update_My_Profile',
+      'profile',
+    ),
+  })
+  @ApiBadRequestResponse({
+    description: 'Cập nhật profile thất bại',
+    type: SwaggerErrorResponse(
+      HttpStatus.BAD_REQUEST,
+      'Cập nhật profile thất bại',
+      'Update_My_Profile',
+      'profile',
+    ),
+  })
   async updateMyProfile(
     @Req() req: any,
     @Body() updateProfileDTO: UpdateProfileDTO,
+    @Res() res: Response,
     @UploadedFile() file?: Express.Multer.File,
   ) {
-    this.logger.debug(`updateMyProfile called for account: ${req.account.id}`);
-    this.logger.debug(`Request body: ${JSON.stringify(updateProfileDTO)}`);
-    this.logger.debug(`File included: ${file ? 'Yes' : 'No'}`);
-    if (file) {
-      this.logger.debug(
-        `File details: name=${file.originalname}, size=${file.size}, mimetype=${file.mimetype}`,
-      );
-    }
-
     try {
-      this.logger.debug(`Updating profile for account ID: ${req.account.id}`);
       const profile = await this.profileService.updateProfile(
-        req.account.id,
+        req.account.profileId,
         updateProfileDTO,
         file,
       );
-      this.logger.debug(
-        `Profile updated successfully: ${JSON.stringify(profile)}`,
-      );
-      return {
-        status: 'success',
-        message: 'Cập nhật profile thành công',
-        data: profile,
-      };
+      return res
+        .status(HttpStatus.OK)
+        .send(successResponse(profile, 'Cập nhật profile thành công'));
     } catch (error) {
-      this.logger.error(`Error in updateMyProfile: ${error.message}`);
       this.logger.error(error.stack);
-      throw error;
+      return res
+        .status(HttpStatus.BAD_REQUEST)
+        .send(errorResponse('Cập nhật profile thất bại', 400, error.message));
     }
   }
 
   @UseGuards(JwtAuthGuard)
   @Get(':id')
   @ApiOperation({ summary: 'Lấy thông tin profile theo ID' })
-  @ApiResponse({ status: 200, description: 'Lấy thông tin thành công' })
-  @ApiResponse({ status: 401, description: 'Không có quyền truy cập' })
-  @ApiResponse({ status: 404, description: 'Không tìm thấy profile' })
-  async getProfileById(@Param('id') id: string) {
+  @ApiOkResponse({
+    description: 'Lấy thông tin profile thành công',
+    type: SwaggerSuccessResponse('Get_Profile_By_ID', 'profile', GetProfileDTO),
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Không có quyền truy cập',
+    type: SwaggerErrorResponse(
+      HttpStatus.UNAUTHORIZED,
+      'Không có quyền truy cập',
+      'Get_Profile_By_ID',
+      'profile',
+    ),
+  })
+  @ApiBadRequestResponse({
+    description: 'Lấy thông tin profile thất bại',
+    type: SwaggerErrorResponse(
+      HttpStatus.BAD_REQUEST,
+      'Lấy thông tin profile thất bại',
+      'Get_Profile_By_ID',
+      'profile',
+    ),
+  })
+  async getProfileById(@Param('id') id: string, @Res() res: Response) {
     this.logger.debug(`getProfileById called with ID: ${id}`);
     try {
-      this.logger.debug(`Fetching profile with ID: ${id}`);
       const profile = await this.profileService.getProfileById(id);
-      this.logger.debug(
-        `Profile fetched successfully: ${JSON.stringify(profile)}`,
-      );
-      return {
-        status: 'success',
-        message: 'Lấy thông tin profile thành công',
-        data: profile,
-      };
+      return res
+        .status(HttpStatus.OK)
+        .send(successResponse(profile, 'Lấy thông tin profile thành công'));
     } catch (error) {
-      this.logger.error(`Error in getProfileById: ${error.message}`);
       this.logger.error(error.stack);
-      throw error;
+      return res
+        .status(HttpStatus.BAD_REQUEST)
+        .send(
+          errorResponse('Lấy thông tin profile thất bại', 400, error.message),
+        );
     }
   }
 
   @UseGuards(JwtAuthGuard)
   @Get('username/:username')
   @ApiOperation({ summary: 'Tìm kiếm profile theo username' })
-  @ApiResponse({ status: 200, description: 'Tìm kiếm thành công' })
-  @ApiResponse({ status: 401, description: 'Không có quyền truy cập' })
-  @ApiResponse({ status: 404, description: 'Không tìm thấy profile' })
-  async findProfileByUsername(@Param('username') username: string) {
-    this.logger.debug(
-      `findProfileByUsername called with username: ${username}`,
-    );
+  @ApiOkResponse({
+    description: 'Tìm kiếm profile thành công',
+    type: SwaggerSuccessResponse(
+      'Find_Profile_By_Username',
+      'profile',
+      GetProfileDTO,
+    ),
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Không có quyền truy cập',
+    type: SwaggerErrorResponse(
+      HttpStatus.UNAUTHORIZED,
+      'Không có quyền truy cập',
+      'Find_Profile_By_Username',
+      'profile',
+    ),
+  })
+  @ApiBadRequestResponse({
+    description: 'Tìm kiếm profile thất bại',
+    type: SwaggerErrorResponse(
+      HttpStatus.BAD_REQUEST,
+      'Tìm kiếm profile thất bại',
+      'Find_Profile_By_Username',
+      'profile',
+    ),
+  })
+  async findProfileByUsername(
+    @Param('username') username: string,
+    @Res() res: Response,
+  ) {
     try {
-      this.logger.debug(`Finding profile with username: ${username}`);
       const result = await this.profileService.findByUsername(username);
-      const data = {
-        id: result.profile.id,
-        name: result.profile.name,
-        avatar: result.profile.avatar,
-      };
-      this.logger.debug(`Profile found successfully: ${JSON.stringify(data)}`);
-      return {
-        status: 'success',
-        message: 'Tìm kiếm profile thành công',
-        data: data,
-      };
+      return res
+        .status(HttpStatus.OK)
+        .send(successResponse(result, 'Tìm kiếm profile thành công'));
     } catch (error) {
-      this.logger.error(`Error in findProfileByUsername: ${error.message}`);
       this.logger.error(error.stack);
-      return {
-        status: 'fail',
-        message: error.message,
-        data: {},
-      };
+      return res
+        .status(HttpStatus.BAD_REQUEST)
+        .send(errorResponse('Tìm kiếm profile thất bại', 400, error.message));
     }
   }
 }
