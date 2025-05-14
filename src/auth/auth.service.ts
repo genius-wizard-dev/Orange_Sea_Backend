@@ -61,7 +61,6 @@ export class AuthService {
       }
 
       const refreshToken = await this.tokenService.generateRefreshToken({
-        account,
         profileId: account.profile.id,
         deviceId,
         ip,
@@ -69,7 +68,6 @@ export class AuthService {
       });
 
       const accessToken = await this.tokenService.generateAccessToken(
-        account,
         account.profile.id,
       );
 
@@ -307,9 +305,9 @@ export class AuthService {
       } else {
         // Trường hợp không có refreshToken, cố gắng giải mã accessToken để lấy user ID
         const decodedToken = this.tokenService.decodeToken(accessToken);
-        if (decodedToken?.profileId) {
+        if (decodedToken?.sub) {
           await this.tokenService.removeDeviceById(
-            decodedToken.profileId,
+            decodedToken.sub,
             deviceId,
           );
         }

@@ -63,7 +63,7 @@ export class AccountController {
     @Res() res: Response,
   ) {
     try {
-      await this.accountService.changePassword(req.account.id, updatePassword);
+      await this.accountService.changePassword(req.user.id, updatePassword);
       return res
         .status(HttpStatus.OK)
         .send(successResponse<null>(null, 'Cập nhật mật khẩu thành công'));

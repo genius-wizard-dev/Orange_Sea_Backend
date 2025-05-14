@@ -1,11 +1,11 @@
 import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { Account } from '@prisma/client';
 import * as crypto from 'crypto';
 import { PrismaService } from 'src/config/prisma/prisma.service';
 import { USER_DEVICE_INFO } from 'src/config/redis/key';
 import { RedisService } from 'src/config/redis/redis.service';
+import { ProfileService } from 'src/profile/services/profile';
 import { DeviceData, JwtPayload } from './interfaces/jwt.interface';
 
 @Injectable()
@@ -20,6 +20,7 @@ export class TokenService {
     private readonly prismaService: PrismaService,
     private readonly jwtService: JwtService,
     private readonly redisService: RedisService,
+    private readonly profileService: ProfileService,
     private readonly configService: ConfigService,
   ) {
     this.accessSecret = this.getConfigValue('JWT_ACCESS_SECRET');
@@ -42,17 +43,15 @@ export class TokenService {
     return value;
   }
 
-  async generateAccessToken(
-    account: Account,
-    profileId: string,
-  ): Promise<string> {
+  async generateAccessToken(profileId: string): Promise<string> {
     try {
       const tokenId = crypto.randomBytes(16).toString('hex');
+      const profile = await this.profileService.getProfileById(profileId);
+      if (!profile) {
+        throw new UnauthorizedException('Profile not found');
+      }
       const payload: JwtPayload = {
-        sub: account.id,
-        profileId,
-        username: account.username,
-        role: account.role,
+        sub: profile.id,
         type: 'access',
         jti: tokenId,
       };
@@ -77,7 +76,6 @@ export class TokenService {
         secret: this.accessSecret,
       });
 
-      // Kiểm tra type của token trước
       if (payload.type !== 'access') {
         throw new UnauthorizedException('Invalid token type');
       }
@@ -92,18 +90,10 @@ export class TokenService {
 
       const deviceData: DeviceData | null =
         await this.redisService.get<DeviceData>(
-          USER_DEVICE_INFO(payload.profileId, deviceId),
+          USER_DEVICE_INFO(payload.sub, deviceId),
         );
       if (!deviceData) {
         throw new UnauthorizedException('Device unknown');
-      }
-
-      // Kiểm tra user trong database
-      const account = await this.prismaService.account.findUnique({
-        where: { id: payload.sub },
-      });
-      if (!account) {
-        throw new UnauthorizedException('User not found');
       }
 
       return payload;
@@ -135,14 +125,12 @@ export class TokenService {
   }
 
   async generateRefreshToken({
-    account,
     profileId,
     deviceId,
     ip,
     fcmToken,
     existingToken,
   }: {
-    account: Account;
     profileId: string;
     deviceId: string;
     ip: string;
@@ -152,11 +140,15 @@ export class TokenService {
     try {
       const { expiresIn, ttl } = this.calculateTokenExpiration(existingToken);
       const tokenId = crypto.randomBytes(16).toString('hex');
+      const profile = await this.prismaService.profile.findUnique({
+        where: { id: profileId },
+        include: { account: true },
+      });
+      if (!profile) {
+        throw new UnauthorizedException('Profile not found');
+      }
       const payload: JwtPayload = {
-        sub: account.id,
-        username: account.username,
-        profileId,
-        role: account.role,
+        sub: profile.id,
         type: 'refresh',
         jti: tokenId,
       };
@@ -207,51 +199,54 @@ export class TokenService {
     return expiration - currentTime;
   }
 
-  private async updateDeviceInRedis(
-    profileId: string,
+  // private async updateDeviceInRedis(
+  //   profileId: string,
+  //   deviceId: string,
+  //   data: { ip: string; fcmToken?: string; token: string },
+  //   ttl: number,
+  // ): Promise<boolean> {
+  //   const userKey = `user:${profileId}`;
+  //   const currentDevice: DeviceData | null =
+  //     await this.redisService.get<DeviceData>(
+  //       USER_DEVICE_INFO(profileId, deviceId),
+  //     );
+
+  //   const deviceData: DeviceData = {
+  //     ...currentDevice,
+  //     ip: data.ip,
+  //     fcmToken: data.fcmToken || '',
+  //     token: data.token,
+  //   };
+
+  //   if (currentDevice) {
+  //     await this.revokeRefreshToken(currentDevice.token, deviceId, data.ip);
+  //   }
+
+  //   await this.redisService.set(
+  //     USER_DEVICE_INFO(profileId, deviceId),
+  //     JSON.stringify(deviceData),
+  //     ttl,
+  //   );
+
+  //   return true;
+  // }
+
+  async verifyRefreshToken(
+    token: string,
     deviceId: string,
-    data: { ip: string; fcmToken?: string; token: string },
-    ttl: number,
-  ): Promise<boolean> {
-    const userKey = `user:${profileId}`;
-    const currentDevice: DeviceData | null =
-      await this.redisService.get<DeviceData>(
-        USER_DEVICE_INFO(profileId, deviceId),
-      );
-
-    const deviceData: DeviceData = {
-      ...currentDevice,
-      ip: data.ip,
-      fcmToken: data.fcmToken || '',
-      token: data.token,
-    };
-
-    if (currentDevice) {
-      await this.revokeRefreshToken(currentDevice.token, deviceId, data.ip);
-    }
-
-    await this.redisService.set(
-      USER_DEVICE_INFO(profileId, deviceId),
-      JSON.stringify(deviceData),
-      ttl,
-    );
-
-    return true;
-  }
-
-  async verifyRefreshToken(token: string, deviceId: string): Promise<Account> {
+  ): Promise<JwtPayload> {
     try {
       const payload = this.jwtService.verify<JwtPayload>(token, {
         secret: this.refreshSecret,
       });
 
-      if (payload.type !== 'refresh' || !payload.sub || !payload.profileId) {
+      if (payload.type !== 'refresh' || !payload.sub) {
         throw new UnauthorizedException('Invalid token format');
       }
 
       const deviceData: DeviceData | null =
         await this.redisService.get<DeviceData>(
-          USER_DEVICE_INFO(payload.profileId, deviceId),
+          USER_DEVICE_INFO(payload.sub, deviceId),
         );
       if (!deviceData) {
         throw new UnauthorizedException('Cannot get device data');
@@ -261,14 +256,7 @@ export class TokenService {
         throw new UnauthorizedException('Invalid refresh token');
       }
 
-      const account = await this.prismaService.account.findUnique({
-        where: { id: payload.sub },
-      });
-      if (!account) {
-        throw new UnauthorizedException('User not found');
-      }
-
-      return account;
+      return payload;
     } catch (error) {
       this.logger.error(`Failed to verify refresh token: ${error.message}`);
       throw new UnauthorizedException('Invalid refresh token');
@@ -282,16 +270,15 @@ export class TokenService {
   ): Promise<void> {
     try {
       const payload = this.jwtService.decode<JwtPayload>(token);
-      if (!payload?.sub || !payload?.profileId)
-        throw new Error('Invalid token: missing user ID or profile ID');
+      if (!payload?.sub) throw new Error('Invalid token: missing user ID');
       const deviceData: DeviceData | null =
         await this.redisService.get<DeviceData>(
-          USER_DEVICE_INFO(payload.profileId, deviceId),
+          USER_DEVICE_INFO(payload.sub, deviceId),
         );
 
       if (!deviceData) {
         this.logger.warn(
-          `Device ${deviceId} not found for user ${payload.profileId}`,
+          `Device ${deviceId} not found for user ${payload.sub}`,
         );
         return;
       }
@@ -310,11 +297,9 @@ export class TokenService {
         // Continue with revocation despite IP mismatch for security
       }
 
-      await this.redisService.del(
-        USER_DEVICE_INFO(payload.profileId, deviceId),
-      );
+      await this.redisService.del(USER_DEVICE_INFO(payload.sub, deviceId));
       this.logger.debug(
-        `Revoked refresh token for device ${deviceId} of user ${payload.profileId}`,
+        `Revoked refresh token for device ${deviceId} of user ${payload.sub}`,
       );
     } catch (error) {
       this.logger.error(`Failed to revoke refresh token: ${error.message}`);

@@ -2,9 +2,11 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
+import { CloudinaryService } from 'src/config/cloudinary/cloudinary.service';
 import { PrismaModule } from 'src/config/prisma/prisma.module';
 import { RedisModule } from 'src/config/redis/redis.module';
 import { ProfileModule } from 'src/profile/profile.module';
+import { ProfileService } from 'src/profile/services/profile';
 import { JwtRefreshStrategy } from './strategy/jwt.refresh.strategy';
 import { JwtStrategy } from './strategy/jwt.strategy';
 import { TokenService } from './token.service';
@@ -30,7 +32,13 @@ import { TokenService } from './token.service';
       }),
     }),
   ],
-  providers: [TokenService, JwtStrategy, JwtRefreshStrategy],
+  providers: [
+    TokenService,
+    JwtStrategy,
+    JwtRefreshStrategy,
+    ProfileService,
+    CloudinaryService,
+  ],
   exports: [TokenService],
 })
 export class TokenModule {}

@@ -87,8 +87,8 @@ jobs:
           ssh -o StrictHostKeyChecking=no ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} << 'EOF'
             set -e
             cd /home/
-            docker compose pull
-            docker compose up -d --build
+            docker compose down --rmi all
+            docker compose up -d
             echo "Kiểm tra trạng thái container:"
             docker ps
             if docker ps | grep -q "orange_sea_backend"; then

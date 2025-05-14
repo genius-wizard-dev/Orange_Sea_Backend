@@ -88,9 +88,8 @@ export class GroupController {
     @Res() res: Response,
   ) {
     try {
-      const accountId = req.account.id;
-      const profile =
-        await this.profileService.getProfileFromAccountId(accountId);
+      const profileId = req.user.id;
+      const profile = await this.profileService.getProfileById(profileId);
       if (!profile) {
         throw new Error('Profile not found');
       }
@@ -137,9 +136,8 @@ export class GroupController {
   })
   async getGroups(@Request() req, @Res() res: Response) {
     try {
-      const accountId = req.account.id;
-      const profile =
-        await this.profileService.getProfileFromAccountId(accountId);
+      const profileId = req.user.id;
+      const profile = await this.profileService.getProfileById(profileId);
       if (!profile) {
         throw new Error('Profile not found');
       }
@@ -190,9 +188,8 @@ export class GroupController {
     @Res() res: Response,
   ) {
     try {
-      const accountId = req.account.id;
-      const profile =
-        await this.profileService.getProfileFromAccountId(accountId);
+      const profileId = req.user.id;
+      const profile = await this.profileService.getProfileById(profileId);
       if (!profile) {
         throw new Error('Profile not found');
       }
@@ -253,9 +250,8 @@ export class GroupController {
     @Res() res: Response,
   ) {
     try {
-      const accountId = req.account.id;
-      const profile =
-        await this.profileService.getProfileFromAccountId(accountId);
+      const profileId = req.user.id;
+      const profile = await this.profileService.getProfileById(profileId);
       if (!profile) {
         throw new Error('Profile not found');
       }
@@ -316,10 +312,11 @@ export class GroupController {
     @Res() res: Response,
   ) {
     try {
-      const accountId = req.account.id;
-      const profile =
-        await this.profileService.getProfileFromAccountId(accountId);
-
+      const profileId = req.user.id;
+      const profile = await this.profileService.getProfileById(profileId);
+      if (!profile) {
+        throw new Error('Profile not found');
+      }
       const result = await this.groupService.deleteGroup(groupId, profile.id);
       return res
         .status(HttpStatus.OK)
@@ -341,9 +338,11 @@ export class GroupController {
     @Res() res: Response,
   ) {
     try {
-      const accountId = req.account.id;
-      const profile =
-        await this.profileService.getProfileFromAccountId(accountId);
+      const profileId = req.user.id;
+      const profile = await this.profileService.getProfileById(profileId);
+      if (!profile) {
+        throw new Error('Profile not found');
+      }
 
       const result = await this.groupService.leaveGroup(groupId, profile.id);
       return res
@@ -394,9 +393,11 @@ export class GroupController {
     @Res() res: Response,
   ) {
     try {
-      const accountId = req.account.id;
-      const profile =
-        await this.profileService.getProfileFromAccountId(accountId);
+      const profileId = req.user.id;
+      const profile = await this.profileService.getProfileById(profileId);
+      if (!profile) {
+        throw new Error('Profile not found');
+      }
 
       const result = await this.groupService.transferOwnership(
         groupId,
@@ -418,20 +419,6 @@ export class GroupController {
         );
     }
   }
-
-  // @Get('search/:keyword')
-  // @UseGuards(JwtAuthGuard)
-  // @ApiOperation({ summary: 'Tìm kiếm nhóm theo tên' })
-  // @ApiParam({ name: 'keyword', description: 'Từ khóa tìm kiếm' })
-  // @ApiResponse({
-  //   status: HttpStatus.OK,
-  //   description: 'Danh sách nhóm phù hợp với từ khóa tìm kiếm',
-  //   type: [GroupResponseDTO],
-  // })
-  // async searchGroups(@Request() req, @Param('keyword') keyword: string) {
-  //   const accountId = req.account.id;
-  //   return this.groupService.searchGroups(accountId, keyword);
-  // }
 
   @Get(':groupId')
   @UseGuards(JwtAuthGuard)
@@ -467,9 +454,11 @@ export class GroupController {
     @Res() res: Response,
   ) {
     try {
-      const accountId = req.account.id;
-      const profile =
-        await this.profileService.getProfileFromAccountId(accountId);
+      const profileId = req.user.id;
+      const profile = await this.profileService.getProfileById(profileId);
+      if (!profile) {
+        throw new Error('Profile not found');
+      }
 
       const result = await this.groupService.getGroupInfo(groupId, profile.id);
       return res
@@ -519,9 +508,11 @@ export class GroupController {
     @Res() res: Response,
   ) {
     try {
-      const accountId = req.account.id;
-      const profile =
-        await this.profileService.getProfileFromAccountId(accountId);
+      const profileId = req.user.id;
+      const profile = await this.profileService.getProfileById(profileId);
+      if (!profile) {
+        throw new Error('Profile not found');
+      }
 
       const result = await this.groupService.renameGroup(
         groupId,
@@ -579,15 +570,17 @@ export class GroupController {
     @Res() res: Response,
   ) {
     try {
-      const accountId = req.account.id;
+      const profileId = req.user.id;
       if (!file) {
         return {
           statusCode: HttpStatus.BAD_REQUEST,
           message: 'Vui lòng chọn ảnh avatar cho nhóm',
         };
       }
-      const profile =
-        await this.profileService.getProfileFromAccountId(accountId);
+      const profile = await this.profileService.getProfileById(profileId);
+      if (!profile) {
+        throw new Error('Profile not found');
+      }
 
       const result = await this.groupService.updateGroupAvatar(
         groupId,

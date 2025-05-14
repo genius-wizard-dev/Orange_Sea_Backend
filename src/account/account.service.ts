@@ -21,19 +21,22 @@ export class AccountService {
   ) {}
 
   async changePassword(
-    accountId: string,
+    profileId: string,
     updatePassword: UpdatePasswordDTO,
   ): Promise<AccountResponseDTO> {
     try {
-      const account = await this.prisma.account.findUnique({
-        where: { id: accountId },
+      const profile = await this.prisma.profile.findUnique({
+        where: { id: profileId },
+        include: { account: true },
       });
 
-      if (!account) {
+      if (!profile || !profile.account) {
         throw new NotFoundException(
-          `Không tìm thấy tài khoản với ID: ${accountId}`,
+          `Không tìm thấy tài khoản với ID hồ sơ: ${profileId}`,
         );
       }
+
+      const account = profile.account;
 
       const isPasswordValid = await bcrypt.compare(
         updatePassword.currentPassword,
@@ -55,11 +58,11 @@ export class AccountService {
       }
 
       const updatedAccount = await this.prisma.account.update({
-        where: { id: accountId },
+        where: { id: account.id },
         data: updateData,
       });
 
-      await this.redisService.del(`user:${accountId}`);
+      await this.redisService.del(`user:${account.id}`);
 
       return this.mapToAccountDTO(updatedAccount);
     } catch (error) {

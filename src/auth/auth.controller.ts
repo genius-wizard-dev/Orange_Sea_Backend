@@ -20,7 +20,7 @@ import { Response } from 'express';
 import {
   DeviceHeaders,
   DeviceInfo,
-} from 'src/common/decorators/client-header.decorator';
+} from 'src/common/decorators/client.header.decorator';
 import { TokenService } from 'src/token/token.service';
 import { errorResponse, successResponse } from 'src/utils/api.response.factory';
 import {
@@ -284,27 +284,12 @@ export class AuthController {
     @Req() req: any,
   ) {
     try {
-      this.logger.log('Refresh token request received', req.account);
-      if (!req.account) {
-        return res
-          .status(HttpStatus.UNAUTHORIZED)
-          .send(
-            errorResponse(
-              'Token không hợp lệ hoặc đã hết hạn',
-              HttpStatus.UNAUTHORIZED,
-            ),
-          );
-      }
-
       const accessToken = await this.tokenService.generateAccessToken(
-        req.account,
-        req.account.profileId,
+        req.user.id,
       );
-
       const refreshToken = req.headers['authorization']?.split(' ')[1];
       const newRefreshToken = await this.tokenService.generateRefreshToken({
-        account: req.account,
-        profileId: req.account.profileId,
+        profileId: req.user.id,
         deviceId: deviceInfo.deviceId,
         ip: deviceInfo.ip,
         fcmToken: deviceInfo.fcmToken,
@@ -366,11 +351,9 @@ export class AuthController {
     try {
       const accessToken = req.headers['authorization']?.replace('Bearer ', '');
       const refreshToken = (req.body as any)?.refresh_token;
-
       if (!accessToken) {
         throw new Error('Access token not provided');
       }
-
       await this.authService.logout(
         accessToken,
         deviceInfo.ip,
