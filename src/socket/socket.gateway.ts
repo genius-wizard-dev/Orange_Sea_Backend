@@ -63,6 +63,10 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
       await this.friendSocketService.fetchFriendShipStatus(profileId, client);
       await this.chatSocketService.unReadMessages(profileId, client);
       await this.socketService.online(profileId, this.server);
+      return {
+        success: true,
+        message: 'Đăng ký thành công',
+      };
     } catch (error) {
       this.logger.error(`Lỗi khi đăng ký: ${error.message}`);
       return {
@@ -76,8 +80,16 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
   async updateProfile(@ConnectedSocket() client: Socket) {
     try {
       await this.profileSocketService.updateProfile(client, this.server);
+      return {
+        success: true,
+        message: 'Cập nhật profile thành công',
+      };
     } catch (error) {
       this.logger.error(`Lỗi khi cập nhật profile: ${error.message}`);
+      return {
+        success: false,
+        message: error.message,
+      };
     }
   }
 
@@ -85,8 +97,16 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
   async updatePassword(@ConnectedSocket() client: Socket) {
     try {
       await this.profileSocketService.updatePassword(client, this.server);
+      return {
+        success: true,
+        message: 'Cập nhật password thành công',
+      };
     } catch (error) {
       this.logger.error(`Lỗi khi cập nhật password: ${error.message}`);
+      return {
+        success: false,
+        message: error.message,
+      };
     }
   }
 
@@ -105,8 +125,16 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
     try {
       const { friendShipId } = data;
       await this.friendSocketService.handleFriend(friendShipId, this.server);
+      return {
+        success: true,
+        message: 'Xử lý yêu cầu kết bạn thành công',
+      };
     } catch (error) {
       this.logger.error(`Lỗi khi xử lý yêu cầu kết bạn: ${error.message}`);
+      return {
+        success: false,
+        message: error.message,
+      };
     }
   }
 
@@ -115,8 +143,16 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
     try {
       const { groupId } = data;
       await this.groupSocketService.handleGroup(groupId, this.server);
+      return {
+        success: true,
+        message: 'Xử lý yêu cầu nhóm thành công',
+      };
     } catch (error) {
       this.logger.error(`Lỗi khi xử lý yêu cầu nhóm: ${error.message}`);
+      return {
+        success: false,
+        message: error.message,
+      };
     }
   }
 
@@ -125,8 +161,16 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
     try {
       const { groupId } = data;
       await this.groupSocketService.handleMemberGroup(groupId, this.server);
+      return {
+        success: true,
+        message: 'Xử lý yêu cầu nhóm thành công',
+      };
     } catch (error) {
       this.logger.error(`Lỗi khi xử lý yêu cầu nhóm: ${error.message}`);
+      return {
+        success: false,
+        message: error.message,
+      };
     }
   }
   @SubscribeMessage('open')
@@ -142,8 +186,16 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
         client,
         this.server,
       );
+      return {
+        success: true,
+        message: 'Mở nhóm thành công',
+      };
     } catch (error) {
       this.logger.error(`Lỗi khi mở nhóm: ${error.message}`);
+      return {
+        success: false,
+        message: error.message,
+      };
     }
   }
 
@@ -160,9 +212,16 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
         this.server,
         client,
       );
+      return {
+        success: true,
+        message: 'Đóng nhóm thành công',
+      };
     } catch (error) {
       this.logger.error(`Lỗi khi đóng nhóm: ${error.message}`);
-      throw error;
+      return {
+        success: false,
+        message: error.message,
+      };
     }
   }
 
@@ -189,9 +248,16 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
     try {
       const { messageId } = data;
       await this.chatSocketService.recallMessage(messageId, this.server);
+      return {
+        success: true,
+        message: 'Thu hồi tin nhắn thành công',
+      };
     } catch (error) {
       this.logger.error(`Lỗi khi gọi lại tin nhắn: ${error.message}`);
-      throw error;
+      return {
+        success: false,
+        message: error.message,
+      };
     }
   }
 
@@ -200,9 +266,16 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
     try {
       const { messageId } = data;
       await this.chatSocketService.editMessage(messageId, this.server);
+      return {
+        success: true,
+        message: 'Chỉnh sửa tin nhắn thành công',
+      };
     } catch (error) {
       this.logger.error(`Lỗi khi chỉnh sửa tin nhắn: ${error.message}`);
-      throw error;
+      return {
+        success: false,
+        message: error.message,
+      };
     }
   }
 
@@ -213,10 +286,21 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
   ) {
     try {
       const { messageId } = data;
-      await this.chatSocketService.deleteMessage(messageId, this.server, client);
+      await this.chatSocketService.deleteMessage(
+        messageId,
+        this.server,
+        client,
+      );
+      return {
+        success: true,
+        message: 'Xóa tin nhắn thành công',
+      };
     } catch (error) {
       this.logger.error(`Lỗi khi xóa tin nhắn: ${error.message}`);
-      throw error;
+      return {
+        success: false,
+        message: error.message,
+      };
     }
   }
 }
