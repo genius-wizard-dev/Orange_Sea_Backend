@@ -31,18 +31,14 @@ export class JwtRefreshStrategy extends PassportStrategy(
       const deviceId = req.headers['x-device-id'] as string;
 
       await this.tokenService.verifyRefreshToken(refreshToken, deviceId);
-      const profile = await this.profileService.getProfileById(
-        payload.profileId,
-      );
+      const profile = await this.profileService.getProfileById(payload.sub);
       if (!profile) {
         throw new UnauthorizedException('User does not exist');
       }
 
       return {
         id: profile.id,
-        username: profile.username,
         role: profile.role,
-        profileId: profile.id,
       };
     } catch (error) {
       throw new UnauthorizedException(error.message);
