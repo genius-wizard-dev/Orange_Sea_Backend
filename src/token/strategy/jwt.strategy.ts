@@ -37,18 +37,14 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
       await this.tokenService.validateAccessToken(token, deviceId);
 
       // Kiểm tra user có tồn tại không
-      const profile = await this.profileService.findByUsername(
-        payload.username,
-      );
+      const profile = await this.profileService.getProfileById(payload.sub);
       if (!profile) {
         throw new UnauthorizedException('User does not exist');
       }
 
       return {
         id: profile.id,
-        username: profile.username,
         role: profile.role,
-        profileId: profile.id,
       };
     } catch (error) {
       throw new UnauthorizedException(error.message);

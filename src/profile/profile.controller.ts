@@ -66,9 +66,7 @@ export class ProfileController {
   })
   async getMyProfile(@Req() req: any, @Res() res: Response) {
     try {
-      const profile = await this.profileService.getProfileById(
-        req.account.profileId,
-      );
+      const profile = await this.profileService.getProfileById(req.user.id);
       return res
         .status(HttpStatus.OK)
         .send(successResponse(profile, 'Lấy thông tin profile thành công'));
@@ -125,7 +123,7 @@ export class ProfileController {
   ) {
     try {
       const profile = await this.profileService.updateProfile(
-        req.account.profileId,
+        req.user.id,
         updateProfileDTO,
         file,
       );

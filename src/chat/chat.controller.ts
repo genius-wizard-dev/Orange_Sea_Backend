@@ -113,7 +113,7 @@ export class ChatController {
       }
 
       const result = await this.chatService.sendMessage(
-        req.account.profileId,
+        req.user.id,
         groupId,
         message,
         messageType,
@@ -170,7 +170,7 @@ export class ChatController {
       // Thu hồi tin nhắn
       const result = await this.chatService.recallMessage(
         messageId,
-        req.account.profileId,
+        req.user.id,
       );
 
       return res
@@ -221,7 +221,7 @@ export class ChatController {
     try {
       const result = await this.chatService.deleteMessage(
         messageId,
-        req.account.profileId,
+        req.user.id,
       );
 
       return res
@@ -275,7 +275,7 @@ export class ChatController {
       const result = await this.chatService.forwardMessage(
         messageId,
         groupId,
-        req.account.profileId,
+        req.user.id,
       );
 
       return res
@@ -324,7 +324,7 @@ export class ChatController {
       const limit = 10;
       const messageData = await this.chatService.getMessagesPaginated(
         groupId,
-        req.account.profileId,
+        req.user.id,
         limit,
         cursor,
       );
@@ -372,7 +372,7 @@ export class ChatController {
       const editedMessage = await this.chatService.editMessage(
         messageId,
         newContent,
-        req.account.profileId,
+        req.user.id,
       );
 
       return res
@@ -419,7 +419,7 @@ export class ChatController {
   ) {
     try {
       const isGroupMember = await this.groupService.isGroupMember(
-        req.account.profileId,
+        req.user.id,
         groupId,
       );
 
@@ -432,7 +432,7 @@ export class ChatController {
 
       const mediaData = await this.chatService.getMediaByType(
         groupId,
-        req.account.profileId,
+        req.user.id,
         messageType,
         limit,
         body.cursor,

@@ -84,7 +84,7 @@ export class FriendshipController {
   ) {
     try {
       const result = await this.friendshipService.sendFriendRequest(
-        req.account.profileId,
+        req.user.id,
         data.receiverId,
       );
       return res
@@ -133,7 +133,7 @@ export class FriendshipController {
   async getReceivedRequests(@Req() req: any, @Res() res: Response) {
     try {
       const result = await this.friendshipService.getReceivedRequests(
-        req.account.profileId,
+        req.user.id,
       );
       return res
         .status(HttpStatus.OK)
@@ -190,7 +190,7 @@ export class FriendshipController {
   async getSentRequests(@Req() req: any, @Res() res: Response) {
     try {
       const result = await this.friendshipService.getSendingRequests(
-        req.account.profileId,
+        req.user.id,
       );
       return res
         .status(HttpStatus.OK)
@@ -261,7 +261,7 @@ export class FriendshipController {
       }
       const result = await this.friendshipService.handleFriendRequest(
         friendShipId,
-        req.account.profileId,
+        req.user.id,
         body.action,
       );
       return res
@@ -309,9 +309,7 @@ export class FriendshipController {
   })
   async getFriends(@Req() req: any, @Res() res: Response) {
     try {
-      const result = await this.friendshipService.getFriends(
-        req.account.profileId,
-      );
+      const result = await this.friendshipService.getFriends(req.user.id);
       return res
         .status(HttpStatus.OK)
         .send(successResponse(result, 'Lấy danh sách bạn bè thành công'));
@@ -356,7 +354,7 @@ export class FriendshipController {
     @Res() res: Response,
   ) {
     try {
-      await this.friendshipService.deleteFriendship(id, req.account.profileId);
+      await this.friendshipService.deleteFriendship(id, req.user.id);
       return res
         .status(HttpStatus.OK)
         .send(successResponse(null, 'Mối quan hệ bạn bè đã được xóa'));
@@ -407,7 +405,7 @@ export class FriendshipController {
   ) {
     try {
       const result = await this.friendshipService.searchUser(
-        req.account.profileId,
+        req.user.id,
         keyword,
       );
       return res
@@ -459,7 +457,7 @@ export class FriendshipController {
   ) {
     try {
       const isFriend = await this.friendshipService.isFriend(
-        req.account.profileId,
+        req.user.id,
         profileId,
       );
       return res
