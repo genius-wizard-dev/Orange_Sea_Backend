@@ -1,11 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
+import { ChatService } from 'src/chat/services/chat';
 import {
   SOCKET_EXPIRATION,
   SOCKET_TO_ACTIVE_GROUP,
 } from 'src/config/redis/key';
 import { RedisService } from 'src/config/redis/redis.service';
-import { ProfileService } from 'src/profile/services/profile';
 import { SocketService } from 'src/socket/socket.service';
 import { GroupService } from './group';
 @Injectable()
@@ -15,7 +15,7 @@ export class GroupSocketService {
   constructor(
     private readonly redisService: RedisService,
     private readonly groupService: GroupService,
-    private readonly profileService: ProfileService,
+    private readonly chatService: ChatService,
     private readonly socketService: SocketService,
   ) {}
 
@@ -153,14 +153,69 @@ export class GroupSocketService {
 
       client.join(groupId);
 
+      // Mark all unread messages as read when user opens the group
+      const readMessagesResult = await this.markAllMessagesAsRead(
+        profileId,
+        groupId,
+      );
+
       server.to(groupId).emit('memberOpenGroup', {
         profileId,
       });
 
-      this.logger.log(`User ${profileId} is now active in group ${groupId}`);
+      if (
+        readMessagesResult &&
+        readMessagesResult.messageIds &&
+        readMessagesResult.messageIds.length > 0
+      ) {
+        server.to(groupId).emit('messagesRead', {
+          profileId,
+          groupId,
+          messageIds: readMessagesResult.messageIds,
+        });
+        const { online } = await this.getGroupMemberStatus(groupId);
+        if (online && online.length > 0) {
+          server.to(online).emit('messagesRead', {
+            profileId,
+            groupId,
+            messageIds: readMessagesResult.messageIds,
+          });
+        }
+      }
+
+      this.logger.log(`User ${profileId} ctive in group ${groupId}`);
     } catch (error) {
       this.logger.error(`Failed to open group: ${error.message}`, error.stack);
       client.emit('error', { message: 'Failed to open group' });
+    }
+  }
+
+  private async markAllMessagesAsRead(
+    profileId: string,
+    groupId: string,
+  ): Promise<{ count: number; messageIds: string[] }> {
+    try {
+      const result = await this.chatService.markMessagesAsRead(
+        profileId,
+        groupId,
+      );
+
+      if (result.count > 0) {
+        this.logger.log(
+          `Marked ${result.count} messages as read for user ${profileId} in group ${groupId}`,
+        );
+      }
+
+      return {
+        count: result.count,
+        messageIds: result.messageIds || [],
+      };
+    } catch (error) {
+      this.logger.error(
+        `Failed to mark messages as read: ${error.message}`,
+        error.stack,
+      );
+      return { count: 0, messageIds: [] };
     }
   }
 
