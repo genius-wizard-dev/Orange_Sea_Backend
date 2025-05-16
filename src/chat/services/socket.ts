@@ -3,24 +3,19 @@ import { Server, Socket } from 'socket.io';
 import { FcmService } from 'src/config/firebase/fcm.service';
 import { SOCKET_TO_ACTIVE_GROUP, USER_DEVICE_INFO } from 'src/config/redis/key';
 import { RedisService } from 'src/config/redis/redis.service';
-import { GroupService } from 'src/group/services/group';
 import { GroupSocketService } from 'src/group/services/socket';
-import { ProfileService } from 'src/profile/services/profile';
 import { SocketService } from 'src/socket/socket.service';
 import { DeviceData } from 'src/token/interfaces/jwt.interface';
-import { TokenService } from 'src/token/token.service';
+import { MessageDetailResponseDTO } from '../dto/chat.response.dto';
 import { ChatService } from './chat';
 @Injectable()
 export class ChatSocketService {
   private readonly logger = new Logger(ChatSocketService.name);
 
   constructor(
-    private readonly groupService: GroupService,
     private readonly chatService: ChatService,
     private readonly redisService: RedisService,
     private readonly fcmService: FcmService,
-    private readonly tokenService: TokenService,
-    private readonly profileService: ProfileService,
     private readonly socketService: SocketService,
     private readonly groupSocketService: GroupSocketService,
   ) {}
@@ -39,13 +34,6 @@ export class ChatSocketService {
       const message = await this.chatService.getMessageById(messageId);
       this.logger.debug(`Thông tin tin nhắn: ${JSON.stringify(message)}`);
 
-      const sender = await this.profileService.getProfileById(message.senderId);
-      this.logger.debug(`Thông tin người gửi: ${JSON.stringify(sender)}`);
-
-      const openPayload = message;
-      const notifyPayload = this.createNotificationPayload(message, sender);
-      this.logger.debug(`Payload thông báo: ${JSON.stringify(notifyPayload)}`);
-
       const groupId = message.groupId;
       const { open, online, offline } =
         await this.groupSocketService.getGroupMemberStatus(groupId);
@@ -58,72 +46,34 @@ export class ChatSocketService {
       );
 
       // Xử lý người dùng đang mở nhóm chat
-      await this.handleOpenUsers(
-        open,
-        openPayload,
-        notifyPayload,
-        messageId,
-        groupId,
-        sender.name,
-        server,
-      );
+      await this.handleOpenUsers(open, message, server);
 
       // Xử lý người dùng trực tuyến
-      await this.handleOnlineUsers(
-        online,
-        notifyPayload,
-        groupId,
-        sender.name,
-        server,
-      );
+      await this.handleOnlineUsers(online, message, server);
 
       // Xử lý người dùng ngoại tuyến
-      await this.handleOfflineUsers(
-        offline,
-        notifyPayload,
-        groupId,
-        sender.name,
-      );
+      await this.handleOfflineUsers(offline, message);
 
       this.logger.debug(`Hoàn thành gửi tin nhắn với ID: ${messageId}`);
     } catch (error) {
-      this.logger.error(`Không thể gửi tin nhắn: ${error.message}`);
       this.logger.error(`Chi tiết lỗi: ${error.stack}`);
       throw error;
     }
   }
 
-  private createNotificationPayload(message: any, sender: any) {
-    return {
-      messageId: message.id,
-      groupId: message.groupId,
-      senderName: sender.name,
-      content: message.content,
-      createdAt: message.createdAt,
-      updatedAt: message.updatedAt,
-      type: message.type,
-      isRecalled: message.isRecalled,
-    };
-  }
-
   private async handleOpenUsers(
     openUsers: string[],
-    openPayload: any,
-    notifyPayload: any,
-    messageId: string,
-    groupId: string,
-    senderName: string,
+    message: MessageDetailResponseDTO,
     server: Server,
   ) {
     if (openUsers.length === 0) return;
-
     this.logger.debug(
       `Gửi tin nhắn đến ${openUsers.length} người dùng đang mở nhóm chat`,
     );
-    server.to(groupId).emit('receiveMessage', openPayload);
+    server.to(message.groupId).emit('receiveMessage', message);
 
     const markReadResult = await this.chatService.markMessageAsReadByUsers(
-      messageId,
+      message.id,
       openUsers,
     );
     this.logger.debug(
@@ -135,19 +85,12 @@ export class ChatSocketService {
     this.logger.debug(
       `Tổng số người dùng cần gửi FCM (đang mở): ${fcmTokensMap.size}`,
     );
-    await this.sendFCMNotificationsToUsers(
-      fcmTokensMap,
-      senderName,
-      notifyPayload,
-      groupId,
-    );
+    await this.sendFCMNotificationsToUsers(fcmTokensMap, message);
   }
 
   private async handleOnlineUsers(
     onlineUsers: string[],
-    notifyPayload: any,
-    groupId: string,
-    senderName: string,
+    message: MessageDetailResponseDTO,
     server: Server,
   ) {
     if (onlineUsers.length === 0) return;
@@ -160,40 +103,24 @@ export class ChatSocketService {
       this.logger.debug(
         `Gửi thông báo đến ${allSocketIds.length} socket IDs: ${JSON.stringify(allSocketIds)}`,
       );
-      server.to(allSocketIds).emit('notifyMessage', notifyPayload);
+      server.to(allSocketIds).emit('notifyMessage', message);
     }
-
     this.logger.debug(
       `Tổng số người dùng cần gửi FCM (trực tuyến): ${fcmTokensMap.size}`,
     );
-    await this.sendFCMNotificationsToUsers(
-      fcmTokensMap,
-      senderName,
-      notifyPayload,
-      groupId,
-    );
+    await this.sendFCMNotificationsToUsers(fcmTokensMap, message);
   }
 
   private async handleOfflineUsers(
     offlineUsers: string[],
-    notifyPayload: any,
-    groupId: string,
-    senderName: string,
+    notifyPayload: MessageDetailResponseDTO,
   ) {
     if (offlineUsers.length === 0) return;
 
     this.logger.debug(`Xử lý ${offlineUsers.length} người dùng ngoại tuyến`);
     const fcmTokensMap = await this.collectOfflineDeviceTokens(offlineUsers);
 
-    this.logger.debug(
-      `Tổng số người dùng cần gửi FCM (ngoại tuyến): ${fcmTokensMap.size}`,
-    );
-    await this.sendFCMNotificationsToUsers(
-      fcmTokensMap,
-      senderName,
-      notifyPayload,
-      groupId,
-    );
+    await this.sendFCMNotificationsToUsers(fcmTokensMap, notifyPayload);
   }
 
   private async collectSocketIds(profileIds: string[]): Promise<string[]> {
@@ -266,30 +193,20 @@ export class ChatSocketService {
 
   private async sendFCMNotificationsToUsers(
     fcmTokensMap: Map<string, string[]>,
-    senderName: string,
-    notifyPayload: any,
-    groupId: string,
+    message: MessageDetailResponseDTO,
   ) {
     for (const [profileId, tokens] of fcmTokensMap.entries()) {
       this.logger.debug(
         `Gửi thông báo FCM đến ${tokens.length} thiết bị của người dùng ${profileId}`,
       );
-      this.sendPushNotificationsToTokens(
-        tokens,
-        senderName,
-        notifyPayload,
-        profileId,
-        groupId,
-      );
+      this.sendPushNotificationsToTokens(tokens, profileId, message);
     }
   }
 
   private async sendPushNotificationsToTokens(
     tokens: string[],
-    senderName: string,
-    messageData: any,
     profileId: string,
-    groupId: string,
+    messageData: MessageDetailResponseDTO,
   ) {
     try {
       if (!tokens || tokens.length === 0) return;
@@ -297,7 +214,7 @@ export class ChatSocketService {
       let notificationBody = '';
 
       if (messageData.type === 'TEXT') {
-        notificationBody = messageData.content;
+        notificationBody = messageData.content || '';
       } else if (messageData.type === 'IMAGE') {
         notificationBody = '📷 Sent a photo';
       } else if (messageData.type === 'VIDEO') {
@@ -309,9 +226,9 @@ export class ChatSocketService {
       }
 
       const data = {
-        groupId,
-        messageId: messageData.messageId,
-        senderId: messageData.senderId || '',
+        groupId: messageData.groupId,
+        messageId: messageData.id,
+        senderId: messageData.sender.id || '',
         messageType: messageData.type,
         timestamp: messageData.createdAt?.toString() || Date.now().toString(),
         notificationType: 'NEW_MESSAGE',
@@ -319,7 +236,7 @@ export class ChatSocketService {
 
       await this.fcmService.sendNotificationToMultipleDevices(
         tokens,
-        senderName,
+        messageData.sender.name,
         notificationBody,
         data,
       );
@@ -352,20 +269,16 @@ export class ChatSocketService {
 
       if (open.length > 0) {
         server.to(groupId).emit('messageRecall', {
+          groupId,
           messageId,
         });
       }
 
-      // Kiểm tra xem tin nhắn có phải là tin nhắn cuối cùng không
-      const isLastMessage = await this.chatService.isLastMessageInGroup(
-        messageId,
-        groupId,
-      );
-
-      if (isLastMessage && online.length > 0) {
+      if (online.length > 0) {
         const onlineSocketIds = await this.collectSocketIds(online);
         server.to(onlineSocketIds).emit('notifyRecallMessage', {
           groupId,
+          messageId,
         });
       }
     } catch (error) {
@@ -392,9 +305,9 @@ export class ChatSocketService {
         onlineMembers: online,
         offlineMembers: offline,
       });
-
       if (open.length > 0) {
         server.to(groupId).emit('messageEdit', {
+          groupId,
           messageId,
         });
       }
@@ -402,6 +315,7 @@ export class ChatSocketService {
         const onlineSocketIds = await this.collectSocketIds(online);
         server.to(onlineSocketIds).emit('notifyEditMessage', {
           groupId,
+          messageId,
         });
       }
     } catch (error) {
@@ -450,14 +364,13 @@ export class ChatSocketService {
         }
       }
 
-      // Gửi thông báo đến các socket đang mở group chat
       if (activeSocketIds.length > 0) {
         server.to(activeSocketIds).emit('messageDelete', {
+          groupId,
           messageId,
         });
       }
 
-      // Nếu là tin nhắn cuối cùng, gửi thông báo đến các socket khác của cùng profile
       if (isLastMessage && otherSocketIds.length > 0) {
         server.to(otherSocketIds).emit('notifyMessageDelete', {
           groupId,

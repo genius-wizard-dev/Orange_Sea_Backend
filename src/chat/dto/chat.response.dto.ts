@@ -77,3 +77,118 @@ export class ApiResponseDto<T> {
   @IsOptional()
   message?: string;
 }
+
+export class SenderDTO {
+  @ApiProperty({
+    description: 'ID của người gửi',
+    example: faker.database.mongodbObjectId(),
+  })
+  @IsUUID()
+  @IsNotEmpty()
+  id: string;
+
+  @ApiProperty({
+    description: 'Tên của người gửi',
+    example: faker.person.fullName(),
+  })
+  @IsString()
+  @IsNotEmpty()
+  name: string;
+
+  @ApiProperty({
+    description: 'Avatar của người gửi',
+    example: faker.image.avatar(),
+  })
+  @IsString()
+  @IsOptional()
+  avatar?: string;
+}
+
+export class MessageDetailResponseDTO {
+  @ApiProperty({
+    description: 'ID của tin nhắn',
+    example: faker.database.mongodbObjectId(),
+  })
+  @IsUUID()
+  @IsNotEmpty()
+  id: string;
+
+  @ApiProperty({
+    description: 'Nội dung tin nhắn',
+    example: faker.lorem.sentence(),
+    required: false,
+  })
+  @IsString()
+  @IsOptional()
+  content?: string;
+
+  @ApiProperty({
+    description: 'URL của file đính kèm',
+    example: faker.image.url(),
+    required: false,
+  })
+  @IsUrl()
+  @IsOptional()
+  fileUrl?: string;
+
+  @ApiProperty({
+    description: 'Loại tin nhắn',
+    example: 'TEXT',
+  })
+  @IsString()
+  @IsNotEmpty()
+  type: string;
+
+  @ApiProperty({
+    description: 'Tên file đính kèm',
+    example: 'image.jpg',
+    required: false,
+  })
+  @IsString()
+  @IsOptional()
+  fileName?: string;
+
+  @ApiProperty({
+    description: 'Kích thước file (byte)',
+    example: 1024,
+    required: false,
+  })
+  @IsNumber()
+  @IsOptional()
+  fileSize?: number;
+
+  @ApiProperty({
+    description: 'Trạng thái đã thu hồi',
+    example: false,
+  })
+  @IsNotEmpty()
+  isRecalled: boolean;
+
+  @ApiProperty({
+    description: 'Thông tin người gửi',
+  })
+  @IsNotEmpty()
+  sender: SenderDTO;
+
+  @ApiProperty({
+    description: 'ID của nhóm chat',
+    example: faker.database.mongodbObjectId(),
+  })
+  @IsUUID()
+  @IsNotEmpty()
+  groupId: string;
+
+  @ApiProperty({
+    description: 'Thời gian tạo',
+    example: new Date(),
+  })
+  @IsNotEmpty()
+  createdAt: Date;
+
+  @ApiProperty({
+    description: 'Thời gian cập nhật',
+    example: new Date(),
+  })
+  @IsNotEmpty()
+  updatedAt: Date;
+}

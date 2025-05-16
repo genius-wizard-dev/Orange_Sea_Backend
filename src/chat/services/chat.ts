@@ -4,9 +4,10 @@ import {
   Injectable,
   Logger,
 } from '@nestjs/common';
-import { Message, MessageType } from '@prisma/client';
+import { MessageType } from '@prisma/client';
 import { CloudinaryService } from 'src/config/cloudinary/cloudinary.service';
 import { PrismaService } from 'src/config/prisma/prisma.service';
+import { MessageDetailResponseDTO } from '../dto/chat.response.dto';
 import { MediaMessageType } from '../dto/get.media.dto';
 import { MessageIdResponseDTO } from '../dto/send.message.dto';
 
@@ -240,6 +241,29 @@ export class ChatService {
   //   this.logger.debug(`Unread message count: ${count}`);
   //   return { count };
   // }
+
+  async getUnreadMessageByGroup(
+    userId: string,
+    groupId: string,
+  ): Promise<{ count: number }> {
+    this.logger.debug(
+      `Getting unread message count for user ${userId} in group ${groupId}`,
+    );
+
+    const count = await this.prisma.message.count({
+      where: {
+        groupId,
+        readBy: {
+          none: {
+            userId,
+          },
+        },
+      },
+    });
+
+    this.logger.debug(`Unread message count: ${count}`);
+    return { count };
+  }
 
   async getUnreadMessages(userId: string) {
     this.logger.debug(
@@ -819,11 +843,20 @@ export class ChatService {
     }
   }
 
-  async getMessageById(messageId: string): Promise<Message> {
+  async getMessageById(messageId: string): Promise<MessageDetailResponseDTO> {
     try {
       const message = await this.prisma.message.findUnique({
         where: {
           id: messageId,
+        },
+        include: {
+          sender: {
+            select: {
+              id: true,
+              name: true,
+              avatar: true,
+            },
+          },
         },
       });
 
@@ -831,7 +864,18 @@ export class ChatService {
         throw new BadRequestException('Tin nhắn không tồn tại');
       }
 
-      return message;
+      return {
+        ...message,
+        content: message.content || '',
+        fileUrl: message.fileUrl || '',
+        fileName: message.fileName || '',
+        fileSize: message.fileSize || undefined,
+        sender: {
+          ...message.sender,
+          name: message.sender.name || '',
+          avatar: message.sender.avatar || '',
+        },
+      };
     } catch (error) {
       this.logger.error(
         `Error getting message by ID: ${error.message}`,
