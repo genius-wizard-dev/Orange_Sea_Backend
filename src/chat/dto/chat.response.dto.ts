@@ -191,4 +191,12 @@ export class MessageDetailResponseDTO {
   })
   @IsNotEmpty()
   updatedAt: Date;
+
+  @ApiProperty({
+    description: 'ID của người đã đọc tin nhắn',
+    example: faker.database.mongodbObjectId(),
+  })
+  @IsUUID()
+  @IsOptional()
+  readBy?: string[];
 }
