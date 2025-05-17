@@ -166,52 +166,57 @@ export class ChatService {
   }
 
   async markMessagesAsRead(userId: string, groupId: string) {
-    this.logger.debug(
-      `Marking messages as read for user ${userId} in group ${groupId}`,
-    );
+    try {
+      this.logger.debug(
+        `Đánh dấu tin nhắn đã đọc cho người dùng ${userId} trong nhóm ${groupId}`,
+      );
 
-    // Find all unread messages in the group
-    const unreadMessages = await this.prisma.message.findMany({
-      where: {
-        groupId,
-        readBy: {
-          none: {
-            userId,
+      // Tìm tất cả tin nhắn chưa đọc trong nhóm
+      const unreadMessages = await this.prisma.message.findMany({
+        where: {
+          groupId,
+          readBy: {
+            none: {
+              userId,
+            },
           },
         },
-      },
-      select: {
-        id: true,
-      },
-    });
+        select: {
+          id: true,
+        },
+      });
 
-    this.logger.debug(`Found ${unreadMessages.length} unread messages`);
+      this.logger.debug(`Tìm thấy ${unreadMessages.length} tin nhắn chưa đọc`);
 
-    if (unreadMessages.length === 0) {
-      return { count: 0 };
+      if (unreadMessages.length === 0) {
+        return { count: 0, messageIds: [] };
+      }
+
+      // Tạo biên nhận đã đọc cho tất cả tin nhắn chưa đọc
+      const readReceipts = await this.prisma.$transaction(
+        unreadMessages.map((message) =>
+          this.prisma.readMessage.create({
+            data: {
+              messageId: message.id,
+              userId,
+            },
+          }),
+        ),
+      );
+
+      this.logger.debug(`Đã tạo ${readReceipts.length} biên nhận đã đọc`);
+      this.logger.debug(
+        `ID tin nhắn đã đánh dấu đã đọc: ${unreadMessages.map((m) => m.id).join(', ')}`,
+      );
+
+      return {
+        count: readReceipts.length,
+        messageIds: unreadMessages.map((m) => m.id),
+      };
+    } catch (error) {
+      this.logger.error(`Lỗi khi đánh dấu tin nhắn đã đọc: ${error.message}`);
+      throw error;
     }
-
-    // Create read receipts for all unread messages
-    const readReceipts = await this.prisma.$transaction(
-      unreadMessages.map((message) =>
-        this.prisma.readMessage.create({
-          data: {
-            messageId: message.id,
-            userId,
-          },
-        }),
-      ),
-    );
-
-    this.logger.debug(`Created ${readReceipts.length} read receipts`);
-    this.logger.debug(
-      `Message IDs marked as read: ${unreadMessages.map((m) => m.id).join(', ')}`,
-    );
-
-    return {
-      count: readReceipts.length,
-      messageIds: unreadMessages.map((m) => m.id),
-    };
   }
 
   // async getUnreadMessageCount(userId: string, groupId?: string) {
@@ -857,6 +862,11 @@ export class ChatService {
               avatar: true,
             },
           },
+          readBy: {
+            select: {
+              userId: true,
+            },
+          },
         },
       });
 
@@ -875,6 +885,7 @@ export class ChatService {
           name: message.sender.name || '',
           avatar: message.sender.avatar || '',
         },
+        readBy: message.readBy.map((read) => read.userId),
       };
     } catch (error) {
       this.logger.error(
