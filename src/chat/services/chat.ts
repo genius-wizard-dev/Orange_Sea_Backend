@@ -772,7 +772,7 @@ export class ChatService {
     groupId: string,
     profileId: string,
     messageType: MediaMessageType,
-    limit = 10,
+    limit: number = 10,
     cursor?: string,
   ) {
     this.logger.debug(
@@ -780,6 +780,15 @@ export class ChatService {
     );
 
     try {
+      // Kiểm tra xem nhóm có tồn tại không
+      const group = await this.prisma.group.findUnique({
+        where: { id: groupId },
+      });
+
+      if (!group) {
+        throw new BadRequestException('Nhóm chat không tồn tại');
+      }
+
       const queryOptions: any = {
         where: {
           groupId,
@@ -794,7 +803,7 @@ export class ChatService {
         orderBy: {
           createdAt: 'desc',
         },
-        take: limit,
+        take: Number(limit),
         select: {
           id: true,
           fileUrl: true,
@@ -825,6 +834,15 @@ export class ChatService {
       }
 
       const mediaMessages = await this.prisma.message.findMany(queryOptions);
+
+      // Ghi log chi tiết hơn để debug
+      this.logger.debug(`Query options: ${JSON.stringify(queryOptions)}`);
+
+      if (mediaMessages.length === 0) {
+        this.logger.debug(
+          `Không tìm thấy media nào cho nhóm ${groupId} với loại ${messageType}`,
+        );
+      }
 
       const nextCursor =
         mediaMessages.length === limit
