@@ -259,12 +259,6 @@ export class GroupService {
           },
         },
         include: {
-          messages: {
-            orderBy: {
-              createdAt: 'desc',
-            },
-            take: 1,
-          },
           participants: {
             include: {
               user: {
@@ -282,23 +276,44 @@ export class GroupService {
         },
       });
 
-      return groups.map((group) => ({
-        id: group.id,
-        name: group.name,
-        ownerId: group.ownerId,
-        isGroup: group.isGroup,
-        createdAt: group.createdAt,
-        updatedAt: group.updatedAt,
-        avatar: group.avatar,
-        participants: group.participants.map((participant) => ({
-          id: participant.id,
-          profileId: participant.userId,
-          role: participant.role,
-          name: participant.user.name,
-          avatar: participant.user.avatar,
-        })),
-        lastMessage: group.messages[0],
-      }));
+      const groupsWithLastMessage = await Promise.all(
+        groups.map(async (group) => {
+          // Find the last message that hasn't been deleted by this user
+          const lastMessage = await this.prismaService.message.findFirst({
+            where: {
+              groupId: group.id,
+              deletedBy: {
+                none: {
+                  userId: profileId,
+                },
+              },
+            },
+            orderBy: {
+              createdAt: 'desc',
+            },
+          });
+
+          return {
+            id: group.id,
+            name: group.name,
+            ownerId: group.ownerId,
+            isGroup: group.isGroup,
+            createdAt: group.createdAt,
+            updatedAt: group.updatedAt,
+            avatar: group.avatar,
+            participants: group.participants.map((participant) => ({
+              id: participant.id,
+              profileId: participant.userId,
+              role: participant.role,
+              name: participant.user.name,
+              avatar: participant.user.avatar,
+            })),
+            lastMessage: lastMessage,
+          };
+        }),
+      );
+
+      return groupsWithLastMessage;
     } catch (error) {
       this.logger.error(
         `Error getting groups by account ID: ${error.message}`,
