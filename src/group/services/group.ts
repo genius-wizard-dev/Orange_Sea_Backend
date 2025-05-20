@@ -318,7 +318,9 @@ export class GroupService {
       });
 
       if (!group) {
-        throw new Error('Group not found');
+        throw new Error(
+          'Bạn không phải là thành viên của nhóm này hoặc nhóm không tồn tại',
+        );
       }
       return group.participants.some((p) => p.userId === profileId);
     } catch (error) {

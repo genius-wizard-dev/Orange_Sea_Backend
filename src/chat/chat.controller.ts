@@ -25,6 +25,7 @@ import {
   ApiOkResponse,
   ApiOperation,
   ApiParam,
+  ApiQuery,
   ApiResponse,
   ApiTags,
   ApiUnauthorizedResponse,
@@ -391,6 +392,24 @@ export class ChatController {
     summary: 'Lấy danh sách media (hình ảnh, video, file) của nhóm chat',
   })
   @ApiParam({ name: 'groupId', description: 'ID của nhóm chat' })
+  @ApiQuery({
+    name: 'type',
+    enum: MediaMessageType,
+    required: false,
+    description: 'Loại media cần lấy',
+  })
+  @ApiQuery({
+    name: 'limit',
+    type: Number,
+    required: false,
+    description: 'Số lượng media tối đa cần lấy',
+  })
+  @ApiQuery({
+    name: 'cursor',
+    type: String,
+    required: false,
+    description: 'Vị trí bắt đầu lấy dữ liệu',
+  })
   @ApiResponse({
     status: 200,
     description: 'Danh sách media của nhóm chat',
@@ -414,7 +433,7 @@ export class ChatController {
   async getGroupMedia(
     @Param('groupId') groupId: string,
     @Req() req: any,
-    @Body() body: GetMediaDto,
+    @Query() query: GetMediaDto,
     @Res() res: Response,
   ) {
     try {
@@ -427,15 +446,15 @@ export class ChatController {
         throw new Error('Bạn không có quyền truy cập nhóm này');
       }
 
-      const messageType = body.type || MediaMessageType.IMAGE;
-      const limit = body.limit || 10;
+      const messageType = query.type || MediaMessageType.IMAGE;
+      const limit = query.limit || 10;
 
       const mediaData = await this.chatService.getMediaByType(
         groupId,
         req.user.id,
         messageType,
         limit,
-        body.cursor,
+        query.cursor,
       );
 
       return res
