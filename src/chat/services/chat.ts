@@ -709,7 +709,6 @@ export class ChatService {
 
   async editMessage(messageId: string, newContent: string, profileId: string) {
     this.logger.debug(`Editing message ${messageId} by user ${profileId}`);
-
     try {
       // Kiểm tra tin nhắn tồn tại
       const message = await this.prisma.message.findUnique({
@@ -739,6 +738,15 @@ export class ChatService {
           content: newContent,
           originalContent: message.originalContent || message.content,
           updatedAt: new Date(),
+        },
+        include: {
+          sender: {
+            select: {
+              id: true,
+              name: true,
+              avatar: true,
+            },
+          },
         },
       });
 
