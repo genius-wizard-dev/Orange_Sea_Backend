@@ -187,7 +187,7 @@ export class GroupResponseDTO {
     description: 'Tin nhắn gần nhất trong nhóm',
     type: MessageDTO,
   })
-  lastMessage: Message;
+  lastMessage: Message | null;
 
   @ApiProperty({
     description: 'Ảnh đại diện của nhóm',
