@@ -188,4 +188,12 @@ export class GroupResponseDTO {
     type: MessageDTO,
   })
   lastMessage: Message;
+
+  @ApiProperty({
+    description: 'Ảnh đại diện của nhóm',
+    example: faker.image.url(),
+  })
+  @IsString()
+  @IsOptional()
+  avatar: string | null;
 }

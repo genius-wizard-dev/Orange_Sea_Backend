@@ -289,6 +289,7 @@ export class GroupService {
         isGroup: group.isGroup,
         createdAt: group.createdAt,
         updatedAt: group.updatedAt,
+        avatar: group.avatar,
         participants: group.participants.map((participant) => ({
           id: participant.id,
           profileId: participant.userId,
@@ -480,6 +481,7 @@ export class GroupService {
         isGroup: group.isGroup,
         createdAt: group.createdAt,
         updatedAt: group.updatedAt,
+        avatar: group.avatar,
         participants: group.participants.map((participant) => ({
           id: participant.id,
           profileId: participant.userId,
