@@ -912,6 +912,7 @@ export class ChatService {
           avatar: message.sender.avatar || '',
         },
         readBy: message.readBy.map((read) => read.userId),
+        originalContent: message.originalContent || '',
       };
     } catch (error) {
       this.logger.error(

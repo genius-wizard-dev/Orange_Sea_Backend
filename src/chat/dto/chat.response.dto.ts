@@ -199,4 +199,12 @@ export class MessageDetailResponseDTO {
   @IsUUID()
   @IsOptional()
   readBy?: string[];
+
+  @ApiProperty({
+    description: 'Tin nhắn gốc (nếu có)',
+    example: faker.database.mongodbObjectId(),
+  })
+  @IsString()
+  @IsOptional()
+  originalContent?: string;
 }
