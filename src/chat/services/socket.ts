@@ -297,18 +297,13 @@ export class ChatSocketService {
       const { open, online, offline } =
         await this.groupSocketService.getGroupMemberStatus(groupId);
 
-      this.logger.log({
-        message: 'Thu hồi tin nhắn',
-        messageId,
-        groupId,
-        openMembers: open,
-        onlineMembers: online,
-        offlineMembers: offline,
-      });
       if (open.length > 0) {
         server.to(groupId).emit('messageEdit', {
           groupId,
           messageId,
+          content: message.content,
+          originalContent: message.originalContent,
+          type: message.type,
         });
       }
       if (online.length > 0) {
