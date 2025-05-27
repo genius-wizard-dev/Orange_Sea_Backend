@@ -478,4 +478,43 @@ export class FriendshipController {
         );
     }
   }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('rejected')
+  @ApiOperation({ summary: 'Lấy danh sách yêu cầu kết bạn đã từ chối' })
+  @ApiOkResponse({
+    description: 'Lấy danh sách yêu cầu kết bạn đã từ chối thành công',
+    type: SwaggerSuccessResponse(
+      'Get_Rejected_Requests',
+      'friend',
+      FriendResponse,
+      true,
+    ),
+  })
+  async getRejectedRequests(@Req() req: any, @Res() res: Response) {
+    try {
+      const result = await this.friendshipService.getRejectedRequests(
+        req.user.id,
+      );
+      return res
+        .status(HttpStatus.OK)
+        .send(
+          successResponse(
+            result,
+            'Lấy danh sách yêu cầu kết bạn đã từ chối thành công',
+          ),
+        );
+    } catch (error) {
+      this.logger.error(`Error fetching rejected requests: ${error.message}`);
+      return res
+        .status(HttpStatus.BAD_REQUEST)
+        .send(
+          errorResponse(
+            'Lấy danh sách yêu cầu kết bạn đã từ chối thất bại',
+            400,
+            error.message,
+          ),
+        );
+    }
+  }
 }

@@ -203,6 +203,51 @@ export class FriendshipService {
     }
   }
 
+  async getRejectedRequests(profileId: string): Promise<FriendResponse[]> {
+    try {
+      const friendships = await this.prisma.friendship.findMany({
+        where: {
+          OR: [
+            { senderId: profileId, status: 'REJECTED' },
+            { receiverId: profileId, status: 'REJECTED' },
+          ],
+        },
+        include: {
+          sender: {
+            select: {
+              id: true,
+              name: true,
+              avatar: true,
+            },
+          },
+          receiver: {
+            select: {
+              id: true,
+              name: true,
+              avatar: true,
+            },
+          },
+        },
+      });
+
+      return friendships.map((friendship) => {
+        const friendProfile =
+          friendship.senderId === profileId
+            ? friendship.receiver
+            : friendship.sender;
+
+        return {
+          id: friendship.id,
+          profileId: friendProfile.id,
+          name: friendProfile.name,
+          avatar: friendProfile.avatar,
+        };
+      });
+    } finally {
+      await this.prisma.$disconnect();
+    }
+  }
+
   async getFriends(profileId: string): Promise<FriendResponse[]> {
     try {
       const friendships = await this.prisma.friendship.findMany({
