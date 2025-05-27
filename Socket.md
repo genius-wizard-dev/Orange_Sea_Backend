@@ -50,6 +50,12 @@ socket.emit('resetPassword', { profileId: 'user-profile-id' });
 socket.emit('handleFriend', { friendShipId: 'friendship-id' });
 ```
 
+### Hủy kết bạn
+
+```javascript
+socket.emit('deleteFriend', { friendShipId: 'friendship-id' });
+```
+
 ### Xử lý nhóm
 
 ```javascript
@@ -113,6 +119,10 @@ socket.on('friendOffline', (data) => {
 
 socket.on('friendStatus', (data) => {
   // data: { online: ['friend-id-1', 'friend-id-2'], offline: ['friend-id-3'] }
+});
+
+socket.on('friendDeleted', (data) => {
+  // data: { success: true, message: 'Thông báo hủy kết bạn', friendshipId: 'friendship-id' }
 });
 ```
 

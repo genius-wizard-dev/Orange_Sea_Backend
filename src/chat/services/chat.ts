@@ -5,6 +5,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { MessageType } from '@prisma/client';
+import { AiService } from 'src/config/ai/ai.service';
 import { CloudinaryService } from 'src/config/cloudinary/cloudinary.service';
 import { PrismaService } from 'src/config/prisma/prisma.service';
 import { MessageDetailResponseDTO } from '../dto/chat.response.dto';
@@ -18,6 +19,7 @@ export class ChatService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly cloudinaryService: CloudinaryService,
+    private readonly aiService: AiService,
   ) {}
 
   private async uploadFileByType(
@@ -43,37 +45,53 @@ export class ChatService {
     );
 
     try {
-      let fileResult: { url: string; fileSize: number; originalName: string };
+      // Kiểm tra nội dung ảnh nếu là file ảnh
+      if (type === MessageType.IMAGE) {
+        this.logger.debug('Checking image content with AI before uploading');
 
-      switch (type) {
-        case MessageType.IMAGE:
-          fileResult = await this.cloudinaryService.uploadBufferToCloudinary(
+        const aiCheckResult = await this.aiService.checkImage(file.buffer);
+
+        if (!aiCheckResult.isValid) {
+          this.logger.warn(
+            `Image content rejected by AI check: ${aiCheckResult.reason}`,
+          );
+          throw new BadRequestException(
+            `Hình ảnh chứa nội dung không phù hợp: ${aiCheckResult.reason}`,
+          );
+        }
+
+        this.logger.debug('Image content check passed');
+      }
+
+      // Định nghĩa loại tải lên dựa trên MessageType
+      const uploadActions = {
+        [MessageType.IMAGE]: () =>
+          this.cloudinaryService.uploadBufferToCloudinary(
             file.buffer,
             originalName,
             'chat-images',
-          );
-          break;
-
-        case MessageType.VIDEO:
-          fileResult =
-            await this.cloudinaryService.uploadVideoBufferToCloudinary(
-              file.buffer,
-              originalName,
-              'chat-videos',
-            );
-          break;
-
-        case MessageType.RAW:
-          fileResult = await this.cloudinaryService.uploadRawFileToCloudinary(
+          ),
+        [MessageType.VIDEO]: () =>
+          this.cloudinaryService.uploadVideoBufferToCloudinary(
+            file.buffer,
+            originalName,
+            'chat-videos',
+          ),
+        [MessageType.RAW]: () =>
+          this.cloudinaryService.uploadRawFileToCloudinary(
             file.buffer,
             originalName,
             'chat-files',
-          );
-          break;
+          ),
+      };
 
-        default:
-          throw new Error(`Unsupported file type: ${type}`);
+      // Kiểm tra và thực hiện tải lên dựa trên loại tin nhắn
+      const uploadAction = uploadActions[type];
+      if (!uploadAction) {
+        throw new Error(`Không hỗ trợ loại file: ${type}`);
       }
+
+      const fileResult = await uploadAction();
 
       this.logger.debug(`File uploaded successfully. URL: ${fileResult.url}`);
       return fileResult;

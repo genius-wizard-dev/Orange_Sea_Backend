@@ -5,6 +5,7 @@ import { AccountModule } from './account/account.module';
 import { AuthModule } from './auth/auth.module';
 import { ChatController } from './chat/chat.controller';
 import { ChatModule } from './chat/chat.module';
+import { AiModule } from './config/ai/ai.module';
 import { CloudinaryModule } from './config/cloudinary/cloudinary.module';
 import { CloudinaryService } from './config/cloudinary/cloudinary.service';
 import { FcmModule } from './config/firebase/fcm.module';
@@ -37,6 +38,7 @@ import { TokenModule } from './token/token.module';
     TokenModule,
     ResendModule,
     CloudinaryModule,
+    AiModule,
     GroupModule,
     SocketModule,
     RedisModule,

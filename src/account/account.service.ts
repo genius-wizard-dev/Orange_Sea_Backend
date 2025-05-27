@@ -67,7 +67,13 @@ export class AccountService {
       return this.mapToAccountDTO(updatedAccount);
     } catch (error) {
       this.logger.error(`Failed to update password: ${error.message}`);
-      throw new UnauthorizedException('Cập nhật mật khẩu thất bại');
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      if (error instanceof UnauthorizedException) {
+        throw error;
+      }
+      throw new UnauthorizedException(`Cập nhật mật khẩu thất bại: ${error.message}`);
     }
   }
 

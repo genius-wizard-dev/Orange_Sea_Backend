@@ -34,6 +34,50 @@ export class FriendSocketService {
     }
   }
 
+  async deleteFriend(friendShipId: string, server: Server) {
+    try {
+      const friendShip =
+        await this.friendService.getFriendShipById(friendShipId);
+      const { senderId, receiverId } = friendShip;
+
+      // Lấy danh sách socket của cả hai người dùng
+      const senderSocketIds =
+        await this.socketService.getListSocketIdFromProfileId(senderId);
+      const receiverSocketIds =
+        await this.socketService.getListSocketIdFromProfileId(receiverId);
+
+      // Thực hiện hủy kết bạn trong database
+      await this.friendService.deleteFriendship(friendShipId, senderId);
+
+      // Thông báo cho người gửi đã hủy kết bạn thành công
+      if (senderSocketIds.length > 0) {
+        server.to(senderSocketIds).emit('friendDeleted', {
+          success: true,
+          message: 'Đã hủy kết bạn thành công',
+          friendshipId: friendShipId,
+        });
+      }
+
+      // Thông báo cho người nhận biết họ đã bị hủy kết bạn
+      if (receiverSocketIds.length > 0) {
+        server.to(receiverSocketIds).emit('friendDeleted', {
+          success: true,
+          message: 'Bạn đã bị hủy kết bạn',
+          friendshipId: friendShipId,
+        });
+      }
+
+      // Thông báo cập nhật danh sách bạn bè cho cả hai người dùng
+      const allSocketIds = [...senderSocketIds, ...receiverSocketIds];
+      server.to(allSocketIds).emit('handleFriend');
+
+      this.logger.log(`Đã hủy kết bạn giữa ${senderId} và ${receiverId}`);
+    } catch (error) {
+      this.logger.error(`Lỗi khi hủy kết bạn: ${error.message}`);
+      throw error;
+    }
+  }
+
   async fetchFriendsStatus(profileId: string, client: Socket) {
     try {
       const friends = await this.friendService.getFriends(profileId);

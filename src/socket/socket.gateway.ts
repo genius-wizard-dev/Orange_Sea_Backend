@@ -138,6 +138,24 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
+  @SubscribeMessage('deleteFriend')
+  async deleteFriend(@MessageBody() data: { friendShipId: string }) {
+    try {
+      const { friendShipId } = data;
+      await this.friendSocketService.deleteFriend(friendShipId, this.server);
+      return {
+        success: true,
+        message: 'Hủy kết bạn thành công',
+      };
+    } catch (error) {
+      this.logger.error(`Lỗi khi hủy kết bạn: ${error.message}`);
+      return {
+        success: false,
+        message: error.message,
+      };
+    }
+  }
+
   @SubscribeMessage('handleGroup')
   async handleGroup(@MessageBody() data: { groupId: string }) {
     try {
