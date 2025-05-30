@@ -351,7 +351,7 @@ export class AuthService {
     ]);
 
     // Tạo link reset password
-    const resetLink = `http://localhost:3000/reset/${resetToken}`;
+    const resetLink = `https://orange-sea-web-ochre.vercel.app/reset/${resetToken}`;
 
     try {
       // Gửi email reset password sử dụng ResendService
