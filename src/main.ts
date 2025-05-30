@@ -6,7 +6,7 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   app.setGlobalPrefix('api');
   const cors = {
-    origin: ['http://localhost:3000', 'https://orange-sea-web-ochre.vercel.app'],
+    origin: ['http://localhost:3000', 'https://orange-sea-web-ochre.vercel.app', '*'],
     methods: 'GET, POST, PATCH, DELETE, PUT, OPTIONS',
     allowedHeaders:
       'Content-Type, Accept, Authorization, x-device-id, x-fcm-token, r-key',
