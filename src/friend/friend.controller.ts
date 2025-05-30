@@ -323,50 +323,50 @@ export class FriendshipController {
     }
   }
 
-  // @UseGuards(JwtAuthGuard)
-  // @Put('delete/:id')
-  // @ApiOperation({ summary: 'Xóa mối quan hệ bạn bè' })
-  // @ApiOkResponse({
-  //   description: 'Xóa mối quan hệ bạn bè thành công',
-  //   type: SwaggerSuccessResponse('Delete_Friendship', 'friend'),
-  // })
-  // @ApiBadRequestResponse({
-  //   description: 'Xóa mối quan hệ bạn bè thất bại',
-  //   type: SwaggerErrorResponse(
-  //     HttpStatus.BAD_REQUEST,
-  //     'Xóa mối quan hệ bạn bè thất bại',
-  //     'Delete_Friendship',
-  //     'friend',
-  //   ),
-  // })
-  // @ApiUnauthorizedResponse({
-  //   description: 'Không có quyền truy cập',
-  //   type: SwaggerErrorResponse(
-  //     HttpStatus.UNAUTHORIZED,
-  //     'Không có quyền truy cập',
-  //     'Delete_Friendship',
-  //     'friend',
-  //   ),
-  // })
-  // async deleteFriendship(
-  //   @Req() req: any,
-  //   @Param('id') id: string,
-  //   @Res() res: Response,
-  // ) {
-  //   try {
-  //     await this.friendshipService.deleteFriendship(id, req.user.id);
-  //     return res
-  //       .status(HttpStatus.OK)
-  //       .send(successResponse(null, 'Mối quan hệ bạn bè đã được xóa'));
-  //   } catch (error) {
-  //     this.logger.error(`Error deleting friendship: ${error.message}`);
-  //     return res
-  //       .status(HttpStatus.BAD_REQUEST)
-  //       .send(
-  //         errorResponse('Xóa mối quan hệ bạn bè thất bại', 400, error.message),
-  //       );
-  //   }
-  // }
+  @UseGuards(JwtAuthGuard)
+  @Put('delete/:id')
+  @ApiOperation({ summary: 'Xóa mối quan hệ bạn bè' })
+  @ApiOkResponse({
+    description: 'Xóa mối quan hệ bạn bè thành công',
+    type: SwaggerSuccessResponse('Delete_Friendship', 'friend'),
+  })
+  @ApiBadRequestResponse({
+    description: 'Xóa mối quan hệ bạn bè thất bại',
+    type: SwaggerErrorResponse(
+      HttpStatus.BAD_REQUEST,
+      'Xóa mối quan hệ bạn bè thất bại',
+      'Delete_Friendship',
+      'friend',
+    ),
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Không có quyền truy cập',
+    type: SwaggerErrorResponse(
+      HttpStatus.UNAUTHORIZED,
+      'Không có quyền truy cập',
+      'Delete_Friendship',
+      'friend',
+    ),
+  })
+  async deleteFriendship(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Res() res: Response,
+  ) {
+    try {
+      await this.friendshipService.deleteFriendship(id, req.user.id);
+      return res
+        .status(HttpStatus.OK)
+        .send(successResponse(null, 'Mối quan hệ bạn bè đã được xóa'));
+    } catch (error) {
+      this.logger.error(`Error deleting friendship: ${error.message}`);
+      return res
+        .status(HttpStatus.BAD_REQUEST)
+        .send(
+          errorResponse('Xóa mối quan hệ bạn bè thất bại', 400, error.message),
+        );
+    }
+  }
 
   @UseGuards(JwtAuthGuard)
   @Get('search/:keyword')
