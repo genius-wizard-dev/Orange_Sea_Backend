@@ -10,6 +10,8 @@ export class AiService {
   private readonly logger = new Logger(AiService.name);
 
   constructor(private configService: ConfigService) {
+    this.logger.debug('Initializing AiService...');
+    
     const apiKey = this.configService.get<string>(
       'GOOGLE_GENERATIVE_AI_API_KEY',
     );
@@ -21,16 +23,20 @@ export class AiService {
       return;
     }
 
+    this.logger.debug('Creating Google Generative AI instance...');
     const googleAI = createGoogleGenerativeAI({
       apiKey,
     });
 
     this.model = googleAI('gemini-2.0-flash');
+    this.logger.debug('AI model initialized successfully');
   }
 
   async checkImage(
     file: Buffer,
   ): Promise<{ isValid: boolean; reason?: string }> {
+    this.logger.debug('Starting image validation...');
+    
     try {
       if (!this.model) {
         this.logger.warn(
@@ -44,8 +50,11 @@ export class AiService {
       );
 
       // Convert Buffer to base64
+      this.logger.debug('Converting buffer to base64...');
       const base64Image = file.toString('base64');
+      this.logger.debug(`Base64 conversion completed. Length: ${base64Image.length} characters`);
 
+      this.logger.debug('Sending request to AI model...');
       const { object } = await generateObject({
         model: this.model,
         messages: [
@@ -70,12 +79,14 @@ export class AiService {
       });
 
       this.logger.debug(`AI image check result: ${JSON.stringify(object)}`);
+      this.logger.debug('Image validation completed successfully');
       return object;
     } catch (error) {
       this.logger.error(
         `Lỗi khi phân tích hình ảnh: ${error.message}`,
         error.stack,
       );
+      this.logger.debug('Returning default valid result due to error');
       return { isValid: true };
     }
   }
