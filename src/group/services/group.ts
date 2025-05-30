@@ -528,12 +528,12 @@ export class GroupService {
       });
 
       if (!group) {
-        throw new Error('Group not found');
+        throw new Error('Không tìm thấy nhóm');
       }
 
       // Check if it's a group chat (not a direct message)
       if (!group.isGroup) {
-        throw new Error('You cannot leave a direct message conversation');
+        throw new Error('Bạn không thể rời khỏi cuộc trò chuyện trực tiếp');
       }
 
       // Find the participant
@@ -541,18 +541,18 @@ export class GroupService {
         (p) => p.userId === profileId,
       );
       if (!participant) {
-        throw new Error('You are not a member of this group');
+        throw new Error('Bạn không phải là thành viên của nhóm này');
       }
 
       if (group.ownerId === profileId) {
         throw new Error(
-          'Group owner cannot leave. Transfer ownership first or delete the group',
+          'Chủ sở hữu nhóm không thể rời khỏi nhóm. Vui lòng chuyển quyền sở hữu trước khi rời hoặc xóa nhóm',
         );
       }
 
       if (group.participants.length <= 2) {
         throw new Error(
-          'Cannot leave as the group needs at least 2 members to exist',
+          'Không thể rời khỏi nhóm vì nhóm cần ít nhất 2 thành viên để tồn tại',
         );
       }
 
@@ -561,7 +561,7 @@ export class GroupService {
       });
 
       if (!result) {
-        throw new Error('Failed to leave group');
+        throw new Error('Không thể rời khỏi nhóm');
       }
 
       return {
@@ -586,15 +586,15 @@ export class GroupService {
       });
 
       if (!group) {
-        throw new Error('Group not found');
+        throw new Error('Không tìm thấy nhóm');
       }
 
       if (!group.isGroup) {
-        throw new Error('Ownership transfer is only available for group chats');
+        throw new Error('Chuyển quyền sở hữu chỉ áp dụng cho nhóm chat');
       }
 
       if (group.ownerId !== profileId) {
-        throw new Error('Only the current owner can transfer ownership');
+        throw new Error('Chỉ chủ sở hữu hiện tại mới có thể chuyển quyền sở hữu');
       }
 
       // Tìm người dùng mới và hiện tại trong nhóm
@@ -606,11 +606,11 @@ export class GroupService {
       );
 
       if (!newOwnerParticipant) {
-        throw new Error('The new owner must be a current member of the group');
+        throw new Error('Chủ sở hữu mới phải là thành viên hiện tại của nhóm');
       }
 
       if (!currentOwnerParticipant) {
-        throw new Error('Current owner participant not found in the group');
+        throw new Error('Không tìm thấy thông tin chủ sở hữu hiện tại trong nhóm');
       }
 
       // Thực hiện cập nhật trong một giao dịch để đảm bảo tính nhất quán
@@ -653,15 +653,15 @@ export class GroupService {
       });
 
       if (!group) {
-        throw new Error('Group not found');
+        throw new Error('Không tìm thấy nhóm');
       }
 
       if (!group.isGroup) {
-        throw new Error('Renaming is only available for group chats');
+        throw new Error('Chỉ có thể đổi tên cho nhóm chat, không áp dụng cho đoạn chat 2 người');
       }
 
       if (profileId !== group.ownerId) {
-        throw new Error('Only the current owner can rename the group');
+        throw new Error('Chỉ chủ sở hữu mới có thể đổi tên nhóm');
       }
 
       const updatedGroup = await this.prismaService.group.update({
@@ -676,13 +676,13 @@ export class GroupService {
         },
       });
       if (!updatedGroup) {
-        throw new Error('Failed to rename group');
+        throw new Error('Không thể đổi tên nhóm');
       }
       return {
         groupId: updatedGroup.id,
       };
     } catch (error) {
-      this.logger.error(`Error renaming group: ${error.message}`, error.stack);
+      this.logger.error(`Lỗi đổi tên nhóm: ${error.message}`, error.stack);
       throw error;
     }
   }
